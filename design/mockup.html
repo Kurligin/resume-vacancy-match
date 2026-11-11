@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сверка — макет</title>
+<style>
+:root{
+  --bg:#f5f5f7; --surface:#fff; --fg:#1d1d1f; --fg2:#6e6e73; --fg3:#86868b;
+  --line:rgba(0,0,0,.08); --accent:#0071e3; --accent-soft:#e8f1fc;
+  --full:#1f7a3a; --full-bg:#e6f4ea; --part:#9a5b00; --part-bg:#fff3e0;
+  --no:#c4001a; --no-bg:#fdecee; --unk:#5b5b60; --unk-bg:#efeff4;
+  --hl:#fff4c2; --radius:16px;
+  --spring:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.i-sm{width:13px;height:13px}
+.i-lg{width:20px;height:20px}
+.c-full{color:var(--full)} .c-part{color:var(--part)} .c-acc{color:var(--accent)} .c-no{color:var(--no)}
+
+/* Верхняя панель — полупрозрачный материал */
+.bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;height:56px;padding:0 24px;
+  background:rgba(245,245,247,.72);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+  border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.01em}
+.mark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(145deg,#3a8dff,#0058d0);box-shadow:0 1px 2px rgba(0,60,160,.3),inset 0 1px 0 rgba(255,255,255,.25)}
+.mark .i{width:17px;height:17px;stroke-width:2.2}
+.seg{display:flex;background:rgba(0,0,0,.06);border-radius:9px;padding:2px;margin:0 auto}
+.seg button{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--fg2);transition:background .2s,color .2s}
+.seg button[aria-pressed=true]{background:#fff;color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:980px;font-size:13px;font-weight:500;transition:transform .1s ease-out,background .2s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#0077ed}
+.btn-ghost{background:rgba(0,0,0,.05)}
+.btn-ghost:hover{background:rgba(0,0,0,.08)}
+.btn-white{background:#fff;color:var(--accent);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.mock-tag{font-size:11px;color:var(--fg3);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;max-width:1360px;margin:0 auto;padding:24px}
+.left>*+*,#top>*+*{margin-top:16px}
+
+/* Шапка */
+.head{display:flex;align-items:center;gap:14px}
+.avatar{width:52px;height:52px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#a1a1aa,#6e6e73)}
+.avatar.blue{border-radius:15px;background:linear-gradient(145deg,#3a8dff,#0058d0)}
+.avatar .i{width:26px;height:26px;stroke-width:1.6}
+.head .who{flex:1;min-width:0}
+.head h1{font-size:28px;line-height:1.1;letter-spacing:-.02em;font-weight:700}
+.sub{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;color:var(--fg2);margin-top:5px;font-size:14px}
+.sub span{display:inline-flex;align-items:center;gap:5px}
+.side{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.switch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2);white-space:nowrap}
+.tog{width:38px;height:22px;border-radius:11px;background:#d1d1d6;position:relative;transition:background .25s var(--spring)}
+.tog::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .3s var(--spring)}
+.tog[aria-checked=true]{background:#34c759}
+.tog[aria-checked=true]::after{transform:translateX(16px)}
+.avs{display:flex;gap:6px}
+.av{width:30px;height:30px;border-radius:50%;background:#e5e5ea;color:var(--fg2);font-size:12px;font-weight:600;display:grid;place-items:center;transition:box-shadow .2s,background .2s}
+.av:hover{background:#dcdce1}
+.av[aria-pressed=true]{background:#fff;color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+
+/* Плашки-подсказки */
+.callout{display:flex;gap:12px;align-items:center;border-radius:var(--radius);padding:14px 16px;
+  background:linear-gradient(120deg,#eaf2fd 0%,#eeeefc 100%);border:1px solid rgba(0,113,227,.12)}
+.callout b{font-weight:600}
+.callout .ico{flex:none;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,113,227,.3)}
+.callout .btn{margin-left:auto;flex:none}
+
+/* Карточки и рейтинг */
+.card{background:var(--surface);border-radius:var(--radius);box-shadow:0 1px 2px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.04)}
+.rank{overflow:hidden}
+.rrow{display:grid;grid-template-columns:40px minmax(0,1fr) 150px 120px;align-items:center;gap:16px;width:100%;text-align:left;padding:14px 18px;border-top:1px solid var(--line);transition:background .15s}
+.rrow:first-child{border-top:0}
+.rrow:hover{background:rgba(0,0,0,.02)}
+.rrow[aria-selected=true]{background:#f7f9fd;box-shadow:inset 3px 0 0 var(--accent)}
+.rrow.close{box-shadow:inset 3px 0 0 #b9cdf0}
+.rrow.close[aria-selected=true]{box-shadow:inset 3px 0 0 var(--accent)}
+.tile{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;position:relative}
+.tile.round{border-radius:50%}
+.tile .i{width:19px;height:19px}
+.tile em{position:absolute;right:-5px;top:-5px;min-width:18px;height:18px;border-radius:9px;background:#fff;color:var(--fg2);font:600 11px/18px -apple-system,system-ui,sans-serif;text-align:center;font-style:normal;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.t-ok{background:var(--full-bg);color:var(--full)} .t-mid{background:var(--part-bg);color:var(--part)} .t-bad{background:var(--unk-bg);color:var(--unk)}
+.rrow .t{font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:var(--fg2)}
+.meta span{display:inline-flex;align-items:center;gap:4px}
+.meta .bl{color:var(--no)} .meta .ex{color:var(--accent)} .meta .cl{color:var(--part)}
+.score{display:flex;align-items:center;gap:10px}
+.score .n{font-size:22px;font-weight:600;letter-spacing:-.02em;width:34px}
+.range{position:relative;flex:1;height:6px;background:#ececf0;border-radius:3px}
+.range i{position:absolute;top:0;bottom:0;background:rgba(0,113,227,.22);border-radius:3px}
+.range b{position:absolute;top:-3px;width:3px;height:12px;border-radius:2px;background:var(--accent)}
+.lbl{display:block;font-size:11px;color:var(--fg3);margin-top:3px}
+.verdict{justify-self:end;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:980px;white-space:nowrap}
+.v-ok{background:var(--full-bg);color:var(--full)} .v-mid{background:var(--part-bg);color:var(--part)} .v-bad{background:var(--unk-bg);color:var(--unk)}
+
+/* Обзор: тепловая карта */
+.heat{padding:14px 18px 12px}
+.heat-h{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--fg2);margin-bottom:8px}
+.heat-h b{color:var(--fg);font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:7px}
+.legend{display:flex;gap:12px;font-size:12px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.hg{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,72px);gap:4px 6px;align-items:center}
+.hg .ch{font-size:12px;color:var(--fg3);text-align:center;font-weight:600}
+.hname{display:flex;align-items:center;gap:8px;text-align:left;padding:8px 10px;border-radius:10px;font-weight:500;font-size:14px;transition:background .15s}
+.hname:hover{background:#f5f5f7}
+.hname.on{background:#f7f9fd;color:var(--accent)}
+.hcell{height:36px;border-radius:9px;font-weight:600;font-size:14px;display:grid;place-items:center;transition:transform .15s var(--spring),box-shadow .15s}
+.hcell:hover{transform:scale(1.04)}
+.hcell.on{box-shadow:0 0 0 2px var(--accent)}
+.hcell.s-full{background:var(--full-bg);color:var(--full)} .hcell.s-partial{background:var(--part-bg);color:var(--part)} .hcell.s-unknown{background:var(--unk-bg);color:var(--unk)}
+
+/* Разбор близких */
+.pair{padding:18px}
+.pair h3{display:flex;align-items:center;gap:8px;font-size:17px;letter-spacing:-.01em}
+.pair .lead{color:var(--fg2);margin:4px 0 8px;font-size:14px}
+.vs{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin:10px 0 6px}
+.vs .side-c{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:#f7f7f9}
+.vs .side-c.win{background:var(--full-bg)}
+.vs .vs-n{font-size:20px;font-weight:600;margin-left:auto}
+.vs .mid{font-size:12px;font-weight:600;color:var(--fg3)}
+.agree{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);margin:8px 0 2px}
+.agree .dots{display:flex;gap:3px}
+.agree .dots i{width:8px;height:8px;border-radius:50%;background:#e0e0e5}
+.agree .dots i.y{background:var(--full)}
+
+/* Кратко */
+.summary{padding:16px 18px 14px}
+.sum-h{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+.sum-h .of{font-weight:400;color:var(--fg2);font-size:13px}
+.sum-cols{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px;margin-top:6px}
+.h3{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);margin-top:8px}
+.pt{display:flex;gap:9px;align-items:flex-start;width:100%;text-align:left;padding:7px 8px;margin:0 -8px;border-radius:9px;font-size:14px;transition:background .15s}
+.pt:hover{background:#f5f5f7}
+.pt>.i{margin-top:3px}
+.pt.on{background:var(--hl)}
+.ref{font:600 11px/1 ui-monospace,SFMono-Regular,monospace;color:var(--accent);background:var(--accent-soft);border-radius:5px;padding:3px 5px;margin-left:6px}
+.rec{display:flex;gap:10px;background:#f7f9fd;border-radius:12px;padding:12px 14px;margin:8px 0 2px;font-size:14px}
+.rec .i{margin-top:3px}
+
+/* Вкладки */
+.detail{padding:6px 0 8px}
+.tabs{display:flex;gap:4px;padding:8px 14px 0}
+.tabs button{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:9px;font-size:14px;font-weight:500;color:var(--fg2);transition:background .15s,color .15s}
+.tabs button:hover{color:var(--fg)}
+.tabs button[aria-selected=true]{color:var(--fg);background:rgba(0,0,0,.05)}
+.tabs .cnt{font-size:11px;font-weight:600;color:var(--fg3);background:rgba(0,0,0,.05);border-radius:6px;padding:0 5px}
+.pane{padding:4px 18px 10px}
+.pane.enter{animation:enter .28s var(--spring)}
+@keyframes enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.why{font-size:13px;color:var(--fg2);padding:10px 0 4px}
+.why b{color:var(--fg);font-weight:600}
+.grp{font-size:12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;padding:16px 0 6px}
+.req{display:grid;grid-template-columns:118px minmax(0,1fr);gap:14px;width:100%;text-align:left;padding:10px;margin:0 -10px;border-radius:11px;transition:background .15s}
+.req:hover,.req.on{background:#f5f5f7}
+.req .txt{font-weight:500}
+.req .q{font-size:13px;color:var(--fg2);margin-top:2px}
+.req .q code{font:600 11px/1 ui-monospace,SFMono-Regular,monospace;color:var(--fg3);margin-right:4px}
+.req .q .ask{display:inline-flex;align-items:center;gap:4px;color:var(--accent)}
+.flag{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:500;color:var(--fg2);background:#f0f0f3;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.flag.plus{background:var(--accent-soft);color:var(--accent)}
+.flag.warn{background:var(--part-bg);color:var(--part)}
+.st{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 7px;border-radius:7px;font-size:12px;font-weight:600;white-space:nowrap;align-self:start}
+.st .i{width:13px;height:13px;stroke-width:2.4}
+.s-full{color:var(--full);background:var(--full-bg)} .s-partial{color:var(--part);background:var(--part-bg)}
+.s-no{color:var(--no);background:var(--no-bg)} .s-unknown{color:var(--unk);background:var(--unk-bg)}
+.list{list-style:none;padding:4px 0}
+.list li{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+.list li:first-child{border-top:0}
+.list li>.i{margin-top:3px}
+.letter{white-space:pre-wrap;background:#fafafc;border:1px solid var(--line);border-radius:12px;padding:16px;font-size:14px;margin-top:10px}
+.actions{display:flex;align-items:center;gap:8px;margin-top:12px}
+.stub{display:flex;gap:10px;align-items:center;color:var(--fg2);font-size:14px;padding:16px 0}
+
+/* Текст резюме */
+.doc{position:sticky;top:80px;max-height:calc(100vh - 104px);overflow:auto;padding:14px 0;align-self:start}
+.doc h2{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);padding:0 18px 8px}
+.blk{font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;padding:12px 18px 4px}
+.ln{display:grid;grid-template-columns:30px 1fr;gap:6px;padding:3px 18px;font-size:13px;line-height:1.45;transition:background .35s var(--spring)}
+.ln > span:first-child{color:#c7c7cc;font-variant-numeric:tabular-nums;text-align:right}
+.ln.hl{background:var(--hl)}
+.ln.hl mark{background:#ffe27a;border-radius:3px}
+mark{background:none;color:inherit}
+.mask{display:inline-flex;align-items:center;gap:4px;background:#ececf0;color:var(--fg2);border-radius:5px;padding:0 6px;font-size:12px}
+
+@media (max-width:980px){.wrap{grid-template-columns:1fr}.doc{position:static;max-height:none}.rrow{grid-template-columns:40px 1fr 90px}.rrow .verdict{display:none}.sum-cols{grid-template-columns:1fr}.hg{grid-template-columns:minmax(0,1fr) repeat(4,44px)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (prefers-reduced-transparency:reduce){.bar{background:var(--bg);backdrop-filter:none}}
+</style>
+</head>
+<body>
+<!-- Иконки: линейный набор в стиле Lucide (ISC) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <symbol id="i-logo" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M19 8v3"/><path d="m14 18 2 2 4-4"/><path d="M9 9h1"/><path d="M9 13h6"/></symbol>
+ <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+ <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+ <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+ <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+ <symbol id="i-brief" viewBox="0 0 24 24"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></symbol>
+ <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></symbol>
+ <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+ <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></symbol>
+ <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+ <symbol id="i-half" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></symbol>
+ <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+ <symbol id="i-help" viewBox="0 0 24 24"><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+ <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+ <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></symbol>
+ <symbol id="i-list" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+ <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></symbol>
+ <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+ <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-9 5.7a2 2 0 0 1-2 0L2 7"/></symbol>
+ <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3Z"/></symbol>
+ <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+ <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+ <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7"/><path d="M14.1 14.2a3 3 0 0 1-4.2-4.2"/><path d="M17.5 17.5A10 10 0 0 1 12 19c-7 0-10-7-10-7a13.5 13.5 0 0 1 4.6-5.4"/><path d="m2 2 20 20"/></symbol>
+ <symbol id="i-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.9.7-1.9 1-3 1s-2.1-.3-3-1Z"/><path d="m2 16 3-8 3 8c-.9.7-1.9 1-3 1s-2.1-.3-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
+ <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+ <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/></symbol>
+ <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1"/></symbol>
+</svg>
+
+<header class="bar">
+  <span class="logo"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>Сверка</span>
+  <span class="mock-tag">макет · цифры условные</span>
+  <div class="seg" role="group" aria-label="Направление">
+    <button aria-pressed="true" data-view="cand"><svg class="i i-sm"><use href="#i-user"/></svg>Кандидат → вакансии</button>
+    <button aria-pressed="false" data-view="vac"><svg class="i i-sm"><use href="#i-users"/></svg>Вакансия → кандидаты</button>
+  </div>
+  <button class="btn btn-ghost"><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
+  <button class="btn btn-primary"><svg class="i i-sm"><use href="#i-download"/></svg>Экспорт</button>
+</header>
+
+<main class="wrap">
+  <div class="left">
+    <div id="top"></div>
+    <div class="card summary" id="summary"></div>
+    <div class="card detail">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="req"><svg class="i"><use href="#i-list"/></svg>Требования</button>
+        <button role="tab" aria-selected="false" data-tab="qs"><svg class="i"><use href="#i-chat"/></svg>Вопросы <span class="cnt num" id="qcnt"></span></button>
+        <button role="tab" aria-selected="false" data-tab="mail"><svg class="i"><use href="#i-mail"/></svg>Письмо</button>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+  <aside class="card doc" id="doc" aria-label="Текст резюме"></aside>
+</main>
+
+<script>
+const ic=(n,c='')=>`<svg class="i ${c}"><use href="#i-${n}"/></svg>`;
+const MASK=(t)=>`<span class="mask">${ic('eyeoff','i-sm')}<b>${t}</b></span>`;
+
+/* ---------- Кандидаты: текст резюме [строка, блок, текст] ---------- */
+const C={
+ c1:{n:1,real:'Иванов Алексей',pii:'Мужчина, 25 лет',title:'Ассистент руководителя',file:'резюме 1.docx',applied:'v1',exp:'2 г. 10 мес.',lines:[
+  [1,null,'@name'],[2,null,'@pii'],[3,null,'г. Москва'],
+  [4,'Сопроводительное письмо','Здравствуйте! Пишу по вакансии фронтенд-разработчика на Vue 3 и Tailwind.'],
+  [5,null,'Интерфейсы делаю целиком сам. Трекер привычек — Telegram Mini App: вёрстка на HTML и CSS, календарь-хитмэп, стрики, напоминания.'],
+  [6,null,'Вся работа с запросами, промисами и обработкой ошибок на фронте — моя.'],
+  [7,null,'Пишу на JavaScript и TypeScript, вёрстку проверяю руками в браузере, свои сервисы сам держу на VPS.'],
+  [8,null,'Отвечаю на ваш вопрос про Vue: коммерческих проектов на нём у меня нет, интерфейсы я собирал на чистом JS, с Tailwind тоже пока не работал.'],
+  [9,null,'Компонентный подход, props и emit мне понятны.'],
+  [10,'Желаемая должность','Ассистент руководителя · 80 000 ₽'],
+  [11,null,'Формат работы: Удалённо, Гибрид, Разъездная'],
+  [12,'Опыт работы — 2 года 10 месяцев','Янв 2024 – сейчас · Собственные проекты · Разработчик (Python, JavaScript/TypeScript, Swift)'],
+  [13,null,'Веб-сервисы на Python/FastAPI и REST API, Telegram-боты, Chrome-расширение на Manifest V3, Telegram Mini App.'],
+  [14,null,'Автоматизация рутины: выгрузки в Google Sheets по расписанию, мост Gmail — Telegram, мониторинг учебного портала.'],
+  [15,null,'Янв 2024 – сейчас · Фриланс (самозанятый, с 2025 — ИП) · Специалист по аналитике и проектной документации'],
+  [16,null,'Более 50 заказчиков: частные клиенты и небольшие компании. Повторные обращения и рекомендации — 60–70%.'],
+  [17,null,'Проектная документация: паспорт проекта, WBS, сроки и бюджет, реестр рисков, KPI.'],
+  [18,null,'Аналитика: обработка данных в Excel и Google Sheets, факторный анализ выручки, ABC/XYZ, регулярная отчётность.'],
+  [19,null,'Полный цикл заказа: погружение в незнакомую предметную область, декомпозиция задачи, согласование с заказчиком, сдача в срок.'],
+  [20,null,'Май 2026 – Авг 2026 · ООО «Агентство» · Практикант (аналитика и управление проектами)'],
+  [21,null,'Разбирал организационную структуру, документооборот и схему работы с партнёрами.'],
+  [22,'Навыки','Продвинутый: Деловая переписка · Деловая коммуникация · Работа с большим объёмом информации · Отчётность · Внимательность к деталям'],
+  [23,null,'Средний: MS Excel · Google Sheets · Документооборот · Python'],
+  [24,'Обо мне','В роли ассистента беру на себя деловую переписку и согласования, подготовку материалов к встречам, регулярную отчётность в Excel и Google Sheets, контроль сроков по задачам.'],
+  [25,'Образование','Неоконченное высшее · ТГУ · Управления, Менеджмент (бакалавр менеджмента) · 2027']]},
+ c2:{n:2,real:'Петров Иван',pii:'Мужчина, 45 лет',title:'Frontend-разработчик (Vue.js / Nuxt.js)',file:'резюме 2.docx',applied:'v1',exp:'7 л. 9 мес.',lines:[
+  [1,null,'@name'],[2,null,'@pii'],[3,null,'Проживает: Москва'],
+  [4,'Сопроводительное письмо','Я фронтенд-разработчик с опытом более 7 лет, из них 4+ года активно работаю с Vue.js.'],
+  [5,null,'Стек: Vue 3 (Composition API), Nuxt 3 (включая SSR), TypeScript, Pinia, Vue Router, VueUse.'],
+  [6,null,'Для тестирования — Vitest (ранее Jest), стили — Tailwind CSS, SCSS, CSS Modules.'],
+  [7,null,'Участвовал в миграции с Vue 2 на Vue 3 и с Vuex на Pinia.'],
+  [8,'Желаемая должность','Frontend-разработчик (Vue.js / Nuxt.js) · 160 000 ₽'],
+  [9,null,'Формат работы: удалённо, гибрид, на месте работодателя'],
+  [10,'Опыт работы — 7 лет 9 месяцев','Май 2025 — Август 2026 · ООО Финансы · Frontend-разработчик'],
+  [11,null,'Разработка нового функционала личного кабинета инвестиционной платформы на Nuxt 2: покупка долей, обновление профиля.'],
+  [12,null,'Март 2022 — Май 2025 · ООО Технолоджи · Frontend-разработчик'],
+  [13,null,'Разработка нового функционала: калькуляторы, сложные многошаговые формы заявок; новые страницы сайта по макетам Figma.'],
+  [14,null,'Февраль 2020 — Март 2022 · ООО Статус · Frontend-разработчик'],
+  [15,null,'Адаптивная вёрстка Pixel Perfect по дизайн-макетам с использованием HTML, CSS и JavaScript.'],
+  [16,'Навыки','VueJS · Nuxt.js · Pinia · Composition API · TypeScript · Tailwind CSS · Figma · Vite · Jest · Vitest · Code Review'],
+  [17,'Образование','Высшее · РГГУ · 2010']]},
+ c3:{n:3,real:'Семенов Алексей',pii:null,title:'Frontend-разработчик (Vue + Tailwind)',file:'резюме 3.docx',applied:'v1',exp:'5 л. 2 мес.',lines:[
+  [1,null,'@name'],[2,null,'Проживает: Москва'],
+  [3,'Сопроводительное письмо','Vue.js использовал в коммерческой разработке для создания компонентов каталога, форм и модальных окон.'],
+  [4,null,'Tailwind применял как основную систему стилей, включая настройку конфига и адаптивных брейкпоинтов.'],
+  [5,'Ключевые навыки','HTML5: семантическая верстка, доступность (a11y) на базовом уровне.'],
+  [6,null,'CSS3: Flexbox, Grid, адаптивная и кроссбраузерная верстка.'],
+  [7,null,'JavaScript (ES6+): работа с DOM и событиями, fetch/axios, промисы, async/await, обработка ошибок.'],
+  [8,null,'Vue 3: Composition API, компоненты, props, emit, v-model.'],
+  [9,null,'Инструменты: Figma (чтение макетов, экспорт ассетов), Git.'],
+  [10,null,'Дополнительно: понимание различий SPA и SSR, знакомство с Pinia (базовые сторы).'],
+  [11,'Опыт работы','Frontend-разработчик (Vue + Tailwind), ООО «Образовательные решения»'],
+  [12,null,'Москва, март 2023 — настоящее время (2 года)'],
+  [13,null,'Разработка компонентов на Vue 3: карточки курсов, формы регистрации, модальные окна, пагинация.'],
+  [14,null,'HTML-верстальщик / Junior Frontend, Студия «ВебПрактика» · сентябрь 2021 — февраль 2023'],
+  [15,'Образование','Бакалавр, «Прикладная информатика», 2021'],
+  [16,'Дополнительно','Базовые навыки тестирования интерфейсов (валидация верстки, проверка адаптивности, кроссбраузерность).'],
+  [17,null,'По расположению офиса: Долгопрудный удобен, дорога в среднем занимает 35–45 минут.']]},
+ c4:{n:4,real:'Петрова Лилия',pii:null,title:'Специалист по учёту ОС / бухгалтер',file:'резюме 4.docx',applied:'v2',exp:'17 л.',lines:[
+  [1,null,'@name'],[2,null,'Проживаю в г. Долгопрудный.'],
+  [3,'Сопроводительное письмо','Готова ближайшее время обсудить детали по данной вакансии: специалист по учёту и движению основных средств.'],
+  [4,null,'Формат работы: на месте работодателя'],
+  [5,'Опыт работы','ООО «Центр учёта и отчётности» · Бухгалтер · ноябрь 2025 — настоящее время'],
+  [6,null,'Формирование налоговых деклараций (налог на имущество, транспортный налог, налог на прибыль).'],
+  [7,null,'АО «Логистическая группа» · Бухгалтер · август 2011 — октябрь 2025'],
+  [8,null,'Проверка первичных учётных документов, работа с актами приёма-передачи, накладными, счетами-фактурами.'],
+  [9,null,'Отражение хозяйственных операций в 1С, контроль комплектности и наличия оригиналов документов.'],
+  [10,null,'ИФНС · Специалист юридического отдела · октябрь 2007 — июнь 2010'],
+  [11,'Образование','Центральный университет экономики и права, 2008 — высшее, «Финансы и кредит».'],
+  [12,'Навыки','Уверенное владение 1С:Предприятие 8.2, Контур, MS Excel, Word.'],
+  [13,'Личные качества','Внимательна к деталям, системна. Готова осваивать учёт основных средств.']]},
+};
+const CK=['c1','c2','c3','c4'];
+
+/* ---------- Вакансии ---------- */
+const VAC={
+ v1:{t:'Frontend-разработчик',meta:[['pin','Долгопрудный'],['cal','5/2']]},
+ v2:{t:'Специалист по учёту основных средств',meta:[['pin','Долгопрудный'],['cal','офис 5/2']]},
+ v3:{t:'Куратор образовательного процесса',meta:[['pin','Долгопрудный'],['cal','5/2']]},
+};
+const VK=['v1','v2','v3'];
+
+/* ---------- Баллы всех пар: [балл, низ, верх, блокеры] ---------- */
+const S={
+ 'c1:v1':[35,25,65,2],'c2:v1':[86,84,90,0],'c3:v1':[84,82,88,0],'c4:v1':[9,4,38,1],
+ 'c1:v2':[41,26,87,0],'c2:v2':[9,3,40,1],'c3:v2':[11,4,42,1],'c4:v2':[63,52,80,0],
+ 'c1:v3':[72,71,76,0],'c2:v3':[30,22,58,0],'c3:v3':[28,20,60,0],'c4:v3':[58,50,74,0],
+};
+const verdict=s=>s>=70?['подходит','v-ok','t-ok','check']:s>=45?['частично','v-mid','t-mid','half']:['не подходит','v-bad','t-bad','x'];
+
+/* ---------- Подробности пар: требования [раздел, текст, статус, [[строка, цитата]], пометка] ---------- */
+const D={
+ 'c1:v3':{why:'<b>Первое место.</b> Все обязательные требования закрыты полностью или частично, блокеров нет.',
+  req:[
+   ['Обязательные','Развитые коммуникативные навыки','full',[[16,'Более 50 заказчиков'],[22,'Деловая коммуникация']]],
+   ['Обязательные','Высокий уровень ответственности и самоорганизации','partial',[[24,'контроль сроков по задачам'],[19,'сдача в срок']],'заявлено, мало фактов'],
+   ['Обязательные','Уверенная работа с таблицами и большим объёмом информации','full',[[18,'обработка данных в Excel и Google Sheets'],[14,'выгрузки в Google Sheets по расписанию']],'+сверх: автоматизирует выгрузки'],
+   ['Обязательные','Регулярное взаимодействие с образовательными организациями и командой','partial',[[19,'согласование с заказчиком']],'с образованием не работал'],
+   ['Желательные','Опыт в сфере образования или в госструктурах','unknown',[]],
+   ['Желательные','Опыт делопроизводителя или документоведа','partial',[[23,'Документооборот'],[21,'документооборот']]],
+   ['Из обязанностей','Сбор статистики для отчётности','full',[[18,'регулярная отчётность']]],
+   ['Из обязанностей','Контроль комплектности документов','partial',[[17,'Проектная документация']]],
+   ['Условия · не в балле','Личный ноутбук или ПК','unknown',[]],
+   ['Условия · не в балле','Очный формат, Долгопрудный, 5/2','partial',[[11,'Гибрид']],'офис не указан']],
+  plus:[['Коммуникации с 50+ заказчиками, 60–70% возвращаются',16],['Таблицы и регулярная отчётность, сам автоматизирует выгрузки',14],['Работал с документооборотом на практике',21]],
+  risk:[['Нет опыта в образовании и госструктурах',null],['Ищет удалённый или гибридный формат, вакансия — очная',11]],
+  rec:'Пригласить на собеседование на куратора. Проверить готовность к очной работе в Долгопрудном.',
+  qs:['Готовы ли вы работать очно в Долгопрудном по графику 5/2?','Есть ли у вас личный ноутбук для дней удалённой работы?','Приходилось ли вам работать со школами, вузами или государственными организациями?','Как вы держите сроки, когда параллельно ведёте несколько заказчиков? Приведите пример.'],
+  mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию фронтенд-разработчика. По опыту коммуникаций с заказчиками и работы с отчётностью вам может лучше подойти другая наша вакансия — «Куратор образовательного процесса» (Центр развития ИТ-образования МФТИ).\n\nЕсли интересно, предлагаем созвониться на этой неделе.'},
+ 'c1:v2':{why:'<b>Вилка 26–87.</b> Резюме почти ничего не говорит об учёте: решают ответы на вопросы, а не балл.',
+  req:[
+   ['Обязательные','Высшее экономическое образование','partial',[[25,'Неоконченное высшее']],'менеджмент, не окончено'],
+   ['Обязательные','Опыт от 3 лет в учёте ОС, ТМЦ или складском учёте','unknown',[]],
+   ['Обязательные','Внимание к деталям','partial',[[22,'Внимательность к деталям']],'заявлено, не подтверждено'],
+   ['Обязательные','Коммуникабельность','full',[[16,'Более 50 заказчиков']]],
+   ['Обязательные','Концентрация при монотонной работе','unknown',[]],
+   ['Из обязанностей','Инвентаризация, перемещение и списание ОС','unknown',[]]],
+  plus:[['Коммуникабельность подтверждена работой с заказчиками',16]],risk:[['Опыт учёта ОС не указан — главный вопрос',null]],
+  rec:'Не приоритет. Если кандидат сам интересуется — уточнить опыт учёта.',qs:['Был ли у вас опыт учёта основных средств или ТМЦ? Сколько лет?'],mail:''},
+ 'c1:v1':{why:'<b>Последнее место, хотя балл выше, чем у вакансии по учёту:</b> два обязательных требования прямо опровергнуты.',
+  req:[
+   ['Обязательные','Коммерческая разработка на Vue.js','no',[[8,'коммерческих проектов на нём у меня нет']]],
+   ['Обязательные','Практический опыт с Tailwind CSS','no',[[8,'с Tailwind тоже пока не работал']]],
+   ['Обязательные','JavaScript ES6+: промисы, асинхронность, ошибки','full',[[6,'Вся работа с запросами, промисами и обработкой ошибок']]],
+   ['Обязательные','Опыт работы от 1 года','partial',[[12,'Собственные проекты']],'только свои проекты'],
+   ['Обязательные','HTML5 и семантическая вёрстка','partial',[[5,'вёрстка на HTML и CSS']],'семантика не названа'],
+   ['Обязательные','CSS3: Flexbox, Grid, адаптивная вёрстка','unknown',[]],
+   ['Обязательные','Самостоятельное тестирование интерфейсов','partial',[[7,'вёрстку проверяю руками в браузере']]],
+   ['Желательные','Разница между SSR и SPA','unknown',[]],
+   ['Желательные','Pinia, Nuxt, Monaco Editor','unknown',[]],
+   ['Желательные','Figma','unknown',[]]],
+  plus:[['Сам ведёт проекты от идеи до деплоя',12]],risk:[['Нет коммерческого Vue и Tailwind — прямо в письме',8]],
+  rec:'На эту вакансию не приглашать. Предложить «Куратора образовательного процесса».',qs:['Работали ли вы с Flexbox и Grid? Покажите пример вёрстки.'],mail:''},
+ 'c2:v1':{why:'<b>Первое место.</b> Все обязательные закрыты, три пункта сверх требований. Почти вровень со вторым — см. разбор.',
+  req:[
+   ['Обязательные','Коммерческая разработка на Vue.js','full',[[4,'4+ года активно работаю с Vue.js'],[11,'личного кабинета инвестиционной платформы']],'+сверх: 4+ года, миграция Vue 2 → 3'],
+   ['Обязательные','Практический опыт с Tailwind CSS','full',[[6,'стили — Tailwind CSS']]],
+   ['Обязательные','JavaScript ES6+: промисы, асинхронность, ошибки','partial',[[13,'сложные многошаговые формы заявок']],'промисы прямо не названы'],
+   ['Обязательные','Опыт работы от 1 года','full',[[10,'Май 2025 — Август 2026'],[12,'Март 2022 — Май 2025']],'+сверх: 7 лет 9 мес. по датам'],
+   ['Обязательные','HTML5 и семантическая вёрстка','partial',[[15,'Pixel Perfect по дизайн-макетам']],'семантика не названа'],
+   ['Обязательные','CSS3: Flexbox, Grid, адаптивная вёрстка','full',[[15,'Адаптивная вёрстка']]],
+   ['Обязательные','Самостоятельное тестирование интерфейсов','full',[[6,'Для тестирования — Vitest (ранее Jest)']],'+сверх: автотесты'],
+   ['Желательные','Разница между SSR и SPA','full',[[5,'Nuxt 3 (включая SSR)']]],
+   ['Желательные','Pinia, Nuxt, Monaco Editor','partial',[[5,'Pinia']],'Monaco не указан'],
+   ['Желательные','Figma','full',[[13,'по макетам Figma']]]],
+  plus:[['4+ года Vue в коммерции, миграция Vue 2 → 3 и Vuex → Pinia',7],['Автотесты на Vitest',6],['Nuxt и SSR',5]],
+  risk:[['Уровень выше Middle, ожидания 160 000 ₽',8],['В письме Nuxt 3, в опыте — Nuxt 2',11]],
+  rec:'Пригласить. Уточнить ожидания по уровню задач, зарплате и срочному договору.',
+  qs:['В письме вы указали Nuxt 3, в последнем проекте — Nuxt 2. На какой версии был основной объём работы?','Вакансия уровня Middle на срочный договор. Насколько это совпадает с вашими ожиданиями?','Работали ли вы с Monaco Editor или похожими редакторами кода в браузере?'],
+  mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию фронтенд-разработчика МФТИ. Ваш опыт с Vue 3, Nuxt и автотестами нам интересен — приглашаем на собеседование.\n\nПредложите, пожалуйста, удобное время на этой неделе.'},
+ 'c3:v1':{why:'<b>Второе место с разрывом в 2 балла.</b> Все обязательные закрыты, но меньше пунктов сверх требований.',
+  req:[
+   ['Обязательные','Коммерческая разработка на Vue.js','full',[[3,'Vue.js использовал в коммерческой разработке'],[13,'Разработка компонентов на Vue 3']]],
+   ['Обязательные','Практический опыт с Tailwind CSS','full',[[4,'Tailwind применял как основную систему стилей']]],
+   ['Обязательные','JavaScript ES6+: промисы, асинхронность, ошибки','full',[[7,'промисы, async/await, обработка ошибок']]],
+   ['Обязательные','Опыт работы от 1 года','full',[[12,'март 2023 — настоящее время']],'!в резюме «2 года», по датам 3 г. 9 мес.'],
+   ['Обязательные','HTML5 и семантическая вёрстка','full',[[5,'семантическая верстка']]],
+   ['Обязательные','CSS3: Flexbox, Grid, адаптивная вёрстка','full',[[6,'Flexbox, Grid, адаптивная']]],
+   ['Обязательные','Самостоятельное тестирование интерфейсов','partial',[[16,'Базовые навыки тестирования интерфейсов']],'только ручное'],
+   ['Желательные','Разница между SSR и SPA','full',[[10,'понимание различий SPA и SSR']]],
+   ['Желательные','Pinia, Nuxt, Monaco Editor','partial',[[10,'знакомство с Pinia (базовые сторы)']]],
+   ['Желательные','Figma','full',[[9,'Figma (чтение макетов, экспорт ассетов)']]]],
+  plus:[['Коммерческий Vue 3 и Tailwind — ровно стек вакансии',3],['Ответил на оба вопроса вакансии: про Vue и про дорогу',17],['Семантика и Flexbox/Grid названы явно',5]],
+  risk:[['Стаж в резюме «2 года», по датам — 3 года 9 месяцев',12],['Формулировки почти дословно повторяют вакансию — проверить глубину',null]],
+  rec:'Пригласить и дать тестовое задание на Vue + Tailwind.',
+  qs:['В резюме указано «2 года» в текущей компании, по датам выходит больше трёх лет. Как правильно?','Как вы тестируете компоненты — только вручную или пробовали автотесты?','Расскажите о самом сложном компоненте каталога: что было трудным?'],
+  mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию фронтенд-разработчика МФТИ. Предлагаем следующий шаг — небольшое тестовое задание на Vue 3 и Tailwind, затем собеседование.'},
+ 'c4:v2':{why:'<b>Первое место, но частично.</b> Профильное образование и 14 лет с первичкой, а учёт ОС прямо не назван.',
+  req:[
+   ['Обязательные','Высшее экономическое образование','full',[[11,'«Финансы и кредит»']]],
+   ['Обязательные','Опыт от 3 лет в учёте ОС, ТМЦ или складском учёте','partial',[[8,'актами приёма-передачи, накладными'],[13,'Готова осваивать учёт основных средств']],'ОС прямо не названы'],
+   ['Обязательные','Внимание к деталям','partial',[[13,'Внимательна к деталям']],'заявлено, не подтверждено'],
+   ['Обязательные','Коммуникабельность','unknown',[]],
+   ['Обязательные','Концентрация при монотонной работе','unknown',[]],
+   ['Из обязанностей','Инвентаризация, перемещение и списание ОС','unknown',[]],
+   ['Из обязанностей','Контроль комплектности документов','full',[[9,'контроль комплектности и наличия оригиналов документов']]],
+   ['Условия · не в балле','Офис, Долгопрудный, 5/2','full',[[4,'на месте работодателя']]]],
+  plus:[['14 лет с первичными документами и актами приёма-передачи',8],['Профильное образование «Финансы и кредит»',11],['Формат совпадает: работа на месте работодателя',4]],
+  risk:[['Учёт ОС прямо не указан, сама пишет «готова осваивать»',13]],
+  rec:'Пригласить. На собеседовании проверить учёт ОС и инвентаризацию.',
+  qs:['Участвовали ли вы в инвентаризации основных средств или ТМЦ?','Какие документы по движению имущества вы оформляли: перемещение, списание, ввод в эксплуатацию?'],
+  mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию специалиста по учёту основных средств МФТИ. Приглашаем на собеседование — предложите, пожалуйста, удобное время.'},
+};
+const TAGS={ // короткие метки в рейтинге
+ 'c2:v1':[['ex','up','сверх: Nuxt, автотесты']],'c3:v1':[['cl','alert','стаж: «2 года» ≠ датам']],
+ 'c4:v2':[['cl','alert','учёт ОС не назван']],'c1:v3':[['ex','up','сверх: автоматизация']]};
+
+let st={view:'cand',cand:'c1',vac:'v3',tab:'req',pii:false,pair:false};
+const $=s=>document.querySelector(s);
+const key=(c,v)=>c+':'+v;
+const label=c=>st.pii?C[c].real:'Кандидат '+C[c].n;
+// без блокеров выше, внутри группы — по баллу
+const order=items=>items.sort((a,b)=>(S[a][3]>0)-(S[b][3]>0)||S[b][0]-S[a][0]);
+
+function scoreCell(k){const [s,lo,hi]=S[k];return `<span><span class="score"><span class="n num">${s}</span><span class="range"><i style="left:${lo}%;right:${100-hi}%"></i><b style="left:calc(${s}% - 1px)"></b></span></span><span class="lbl num">вилка ${lo}–${hi}</span></span>`}
+function verdictPill(k){const v=verdict(S[k][0]);return `<span class="verdict ${v[1]}">${ic(v[3],'i-sm')}${v[0]}</span>`}
+function metaTags(k){const b=S[k][3];return (TAGS[k]||[]).map(([c,i,t])=>`<span class="${c}">${ic(i,'i-sm')}${t}</span>`).join('')+(b?`<span class="bl">${ic('lock','i-sm')}${b} ${b>1?'блокера':'блокер'}</span>`:'')}
+const piiTog=()=>`<label class="switch">ФИО и пол <button class="tog" role="switch" aria-checked="${st.pii}" id="pii" aria-label="Показать ФИО и пол"></button></label>`;
+
+/* ---------- Верх: вид «кандидат» ---------- */
+function topCand(){
+  const c=st.cand, x=C[c], ks=order(VK.map(v=>key(c,v))), best=ks[0].split(':')[1];
+  let h=`<div class="head"><span class="avatar">${ic('user')}</span><div class="who"><h1>${label(c)}</h1>
+    <div class="sub"><span>${ic('brief','i-sm')}${x.title}</span><span>${ic('inbox','i-sm')}отклик на «${VAC[x.applied].t}»</span><span>${ic('file','i-sm')}${x.file}</span></div></div>
+    <div class="side"><div class="avs">${CK.map(k=>`<button class="av" aria-pressed="${k===c}" data-cand="${k}" title="${label(k)}">${C[k].n}</button>`).join('')}</div>${piiTog()}</div></div>`;
+  if(best!==x.applied){const a=S[key(c,best)][0],b=S[key(c,x.applied)][0];
+    h+=`<div class="callout"><span class="ico">${ic('arrow')}</span><div><b>Лучше подходит «${VAC[best].t}»: ${a} против ${b}</b> у вакансии отклика. Решают коммуникации с 50+ заказчиками и работа с таблицами. По фронтенду нет коммерческого Vue и Tailwind.</div><button class="btn btn-white" data-vac="${best}">Открыть</button></div>`;}
+  h+=`<div class="card rank" role="listbox" aria-label="Рейтинг вакансий">`+ks.map((k,i)=>{const v=k.split(':')[1],vv=verdict(S[k][0]);
+    return `<button class="rrow" role="option" aria-selected="${v===st.vac}" data-vac="${v}"><span class="tile ${vv[2]}">${ic('brief')}<em class="num">${i+1}</em></span>
+     <span><div class="t">${VAC[v].t}</div><div class="meta">${VAC[v].meta.map(([a,b])=>`<span>${ic(a,'i-sm')}${b}</span>`).join('')}${v===x.applied?`<span>${ic('inbox','i-sm')}отклик</span>`:''}${metaTags(k)}</div></span>${scoreCell(k)}${verdictPill(k)}</button>`}).join('')+`</div>`;
+  return h;
+}
+
+/* ---------- Верх: вид «вакансия» ---------- */
+function topVac(){
+  const v=st.vac, ks=order(CK.map(c=>key(c,v))), ok=ks.filter(k=>S[k][0]>=45).length;
+  const [a,b]=ks, close=S[a][3]===0&&S[b][3]===0&&S[a][0]-S[b][0]<5;
+  let h=`<div class="head"><span class="avatar blue">${ic('brief')}</span><div class="who"><h1>${VAC[v].t}</h1>
+    <div class="sub">${VAC[v].meta.map(([x,y])=>`<span>${ic(x,'i-sm')}${y}</span>`).join('')}<span>${ic('users','i-sm')}${CK.length} резюме · ${ok} подходят хотя бы частично</span></div></div>
+    <div class="side">${piiTog()}</div></div>`;
+  h+=`<div class="card heat"><div class="heat-h"><b>${ic('grid','c-acc')}Обзор: все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
+   <div class="hg"><span></span>${CK.map(c=>`<span class="ch">${st.pii?C[c].real.split(' ')[0]:'К'+C[c].n}</span>`).join('')}
+   ${VK.map(vk=>`<button class="hname ${vk===v?'on':''}" data-vac="${vk}">${ic('brief','i-sm')}${VAC[vk].t}</button>${CK.map(c=>{const s=S[key(c,vk)][0];const cls=s>=70?'s-full':s>=45?'s-partial':'s-unknown';
+     return `<button class="hcell num ${cls} ${vk===v&&c===st.cand?'on':''}" data-vac="${vk}" data-cand="${c}" title="${label(c)} · ${VAC[vk].t}">${s}</button>`}).join('')}`).join('')}</div></div>`;
+  if(close){const ca=a.split(':')[0],cb=b.split(':')[0];
+    h+=`<div class="callout"><span class="ico">${ic('scale')}</span><div><b>${label(ca)} и ${label(cb)} почти равны: ${S[a][0]} и ${S[b][0]}.</b> По баллу их не различить — модель сравнит попарно.</div><button class="btn btn-white" id="pairbtn">${st.pair?'Скрыть':'Разобрать'}</button></div>`;
+    if(st.pair) h+=pairCard(ca,cb,S[a][0],S[b][0]);}
+  h+=`<div class="card rank" role="listbox" aria-label="Рейтинг кандидатов">`+ks.map((k,i)=>{const c=k.split(':')[0],vv=verdict(S[k][0]),isClose=close&&i<2;
+    return `<button class="rrow ${isClose?'close':''}" role="option" aria-selected="${c===st.cand}" data-cand="${c}"><span class="tile round ${vv[2]}">${ic('user')}<em class="num">${i+1}</em></span>
+     <span><div class="t">${label(c)}</div><div class="meta"><span>${ic('brief','i-sm')}${C[c].title}</span><span>${ic('clock','i-sm')}${C[c].exp}</span>${metaTags(k)}</div></span>${scoreCell(k)}${verdictPill(k)}</button>`}).join('')+`</div>`;
+  return h;
+}
+function pairCard(ca,cb,sa,sb){
+  return `<div class="card pair"><h3>${ic('scale','i-lg c-acc')}${label(ca)} подходит больше</h3>
+   <div class="lead">Модель сравнила кандидатов по каждому требованию дважды, поменяв их местами. В зачёт идут только строки, где оба прогона согласны.</div>
+   <div class="vs"><div class="side-c win">${ic('user','c-full')}<b>${label(ca)}</b><span class="vs-n num">${sa}</span></div><span class="mid">против</span><div class="side-c">${ic('user')}<b>${label(cb)}</b><span class="vs-n num">${sb}</span></div></div>
+   <div class="agree"><span class="dots">${Array.from({length:10},(_,i)=>`<i class="${i<4?'y':''}"></i>`).join('')}</span>согласованы 4 строки из 10 · 3 в пользу ${label(ca)}, 1 — ничья</div>
+   <ul class="list">
+    <li>${ic('up','c-acc')}<span><b>Nuxt и SSR</b> — у ${label(ca)} сверх требования: «Nuxt 3 (включая SSR)»; у ${label(cb)} только «понимание различий SPA и SSR».</span></li>
+    <li>${ic('check','c-full')}<span><b>Тестирование</b> — у ${label(ca)} «Vitest (ранее Jest)»; у ${label(cb)} «базовые навыки тестирования», вручную.</span></li>
+    <li>${ic('check','c-full')}<span><b>Pinia</b> — у ${label(ca)} миграция с Vuex на Pinia; у ${label(cb)} «знакомство, базовые сторы».</span></li>
+    <li>${ic('alert','c-part')}<span><b>Учесть</b> — ${label(ca)} заметно выше уровня Middle: ожидания по задачам и зарплате могут не совпасть.</span></li>
+   </ul>
+   <div class="actions"><span class="why" style="padding:0">Порядок в рейтинге сам не меняется.</span><button class="btn btn-ghost">Закрепить первым: ${label(ca)}</button></div></div>`;
+}
+
+/* ---------- Общие блоки ---------- */
+function renderSummary(){
+  const x=D[key(st.cand,st.vac)], t=st.view==='cand'?VAC[st.vac].t:label(st.cand);
+  if(!x){$('#summary').innerHTML=`<div class="sum-h">${ic('bulb','c-acc')}Кратко <span class="of">· ${t}</span></div><div class="stub">${ic('help')}В макете подробности есть не для всех пар: смотрите Frontend-разработчика, учёт ОС или куратора у Кандидата 1.</div>`;return;}
+  const pts=(a,icn,c)=>a.map(([tx,n])=>`<button class="pt"${n?` data-l="${n}"`:''}>${ic(icn,c)}<span>${tx}${n?`<span class="ref">L${n}</span>`:''}</span></button>`).join('');
+  $('#summary').innerHTML=`<div class="sum-h">${ic('bulb','c-acc')}Кратко <span class="of">· ${t}</span></div>
+   <div class="sum-cols"><div><div class="h3">${ic('spark','c-full')}Сильные стороны</div>${pts(x.plus,'check','c-full')}</div>
+   <div><div class="h3">${ic('alert','c-part')}Риски</div>${pts(x.risk,'alert','c-part')}</div></div>
+   <div class="rec">${ic('arrow','c-acc')}<span><b>Рекомендация.</b> ${x.rec}</span></div>`;
+}
+const ST={full:['полное','check'],partial:['частично','half'],no:['нет','x'],unknown:['не указано','help']};
+const quote=ev=>ev.map(([n,q])=>`<code>L${n}</code>«${q}»`).join(' · ');
+function renderPane(){
+  const x=D[key(st.cand,st.vac)]; let h='';
+  $('#qcnt').textContent=x?x.qs.length:'–';
+  if(!x){h=`<div class="stub">${ic('help')}Нет подробностей для этой пары в макете.</div>`;}
+  else if(st.tab==='req'){
+    h=`<div class="why">${x.why}</div>`; let g='';
+    x.req.forEach((r,i)=>{ if(r[0]!==g){g=r[0];h+=`<div class="grp">${g}</div>`;}
+      const m=r[4]||'', plus=m.startsWith('+'), warn=m.startsWith('!');
+      const fl=m?`<span class="flag ${plus?'plus':warn?'warn':''}">${plus?ic('up','i-sm'):warn?ic('alert','i-sm'):''}${plus||warn?m.slice(1):m}</span>`:'';
+      const q=r[3].length?quote(r[3]):(r[2]==='unknown'?`<span class="ask">${ic('chat','i-sm')}не упоминается → вопрос кандидату</span>`:'');
+      h+=`<button class="req" data-i="${i}"><span class="st s-${r[2]}">${ic(ST[r[2]][1])}${ST[r[2]][0]}</span><span><div class="txt">${r[1]}${fl}</div><div class="q">${q}</div></span></button>`; });
+  } else if(st.tab==='qs'){
+    h=`<div class="why" style="display:flex;gap:6px;align-items:center">${ic('shield','c-full')}Из строк «не указано», «частично» и несостыковок. Вопросы о семье, здоровье, возрасте отсекает фильтр.</div><ul class="list">${x.qs.map(q=>`<li>${ic('chat','c-acc')}<span>${q}</span></li>`).join('')}</ul>`;
+  } else {
+    h=x.mail?`<div class="why">Черновик — отправляет рекрутер.</div><div class="letter">${x.mail}</div><div class="actions"><button class="btn btn-ghost">${ic('copy','i-sm')}Скопировать</button></div>`:'<div class="why">Для этой пары письма нет.</div>';
+  }
+  const p=$('#pane'); p.innerHTML=h; p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter');
+}
+function renderDoc(){
+  const x=C[st.cand];
+  let h=`<h2>${ic('file')}${label(st.cand)} · текст, который видела модель</h2>`;
+  for(const [n,b,t] of x.lines){
+    const tx=t==='@name'?(st.pii?x.real:MASK('ФИО скрыто')):t==='@pii'?(st.pii?x.pii:MASK('пол и возраст скрыты')):t;
+    if(b) h+=`<div class="blk">${b}</div>`; h+=`<div class="ln" id="L${n}"><span>${n}</span><span>${tx}</span></div>`; }
+  $('#doc').innerHTML=h;
+}
+function highlight(ev){
+  document.querySelectorAll('.ln.hl').forEach(e=>{e.classList.remove('hl');const s=e.lastChild;if(s.dataset.orig)s.innerHTML=s.dataset.orig;});
+  ev.forEach(([n,q],j)=>{const el=$('#L'+n); if(!el) return; const s=el.lastChild; s.dataset.orig=s.dataset.orig||s.innerHTML;
+    if(q) s.innerHTML=s.dataset.orig.replace(q,`<mark>${q}</mark>`); el.classList.add('hl'); if(j===0) el.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});});
+}
+function render(){ $('#top').innerHTML=st.view==='cand'?topCand():topVac(); renderSummary(); renderPane(); renderDoc(); }
+const bestCand=v=>order(CK.map(c=>key(c,v)))[0].split(':')[0];
+const bestVac=c=>order(VK.map(v=>key(c,v)))[0].split(':')[1];
+
+document.addEventListener('click',e=>{
+  const t=e.target;
+  const sg=t.closest('[data-view]'); if(sg){st.view=sg.dataset.view;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b===sg));
+    if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} else {st.cand='c1';st.vac=bestVac('c1');} st.pair=false; render(); return;}
+  if(t.closest('#pairbtn')){st.pair=!st.pair;render();return;}
+  if(t.closest('#pii')){st.pii=!st.pii;render();return;}
+  const el=t.closest('[data-vac],[data-cand]');
+  if(el){
+    if(el.dataset.vac&&el.dataset.cand){st.vac=el.dataset.vac;st.cand=el.dataset.cand;}
+    else if(el.dataset.vac){st.vac=el.dataset.vac; if(st.view==='vac'){st.cand=bestCand(st.vac);st.pair=false;}}
+    else {st.cand=el.dataset.cand; if(st.view==='cand') st.vac=bestVac(st.cand);}
+    render(); return;}
+  const tb=t.closest('[data-tab]'); if(tb){st.tab=tb.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-selected',b===tb));renderPane();return;}
+  const rq=t.closest('.req'); if(rq){document.querySelectorAll('.req.on').forEach(b=>b.classList.remove('on'));rq.classList.add('on');highlight(D[key(st.cand,st.vac)].req[rq.dataset.i][3]);return;}
+  const pt=t.closest('.pt[data-l]'); if(pt){document.querySelectorAll('.pt.on').forEach(b=>b.classList.remove('on'));pt.classList.add('on');highlight([[+pt.dataset.l,'']]);return;}
+});
+render();
+</script>
+</body>
+</html>
