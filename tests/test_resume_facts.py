@@ -11,6 +11,8 @@ from rvm.experience import (
     parse_dates,
     parse_duration,
     skill_months,
+    snapshot_date,
+    snapshot_note,
     total_months,
 )
 from rvm.facts import Period, ResumeFacts
@@ -37,13 +39,33 @@ needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
         ("2021", date(2021, 1, 1), date(2021, 12, 1), False),
         ("с мая 2020", date(2020, 5, 1), None, True),
         ("дек. 2018 — янв. 2020", date(2018, 12, 1), date(2020, 1, 1), False),
+        ("Jan 2020 — Present", date(2020, 1, 1), None, True),
+        ("September 2019 - Sept 2021", date(2019, 9, 1), date(2021, 9, 1), False),
+        ("May 2021 – now", date(2021, 5, 1), None, True),
+        ("Oct 2022 - current", date(2022, 10, 1), None, True),
+        ("Feb 2023 till now", date(2023, 2, 1), None, True),
+        ("март 2023 - до сих пор", date(2023, 3, 1), None, True),
+        ("апрель 2024 — по сей день", date(2024, 4, 1), None, True),
+        ("июнь 2022 — по наст. вр.", date(2022, 6, 1), None, True),
+        ("Marketing 2020 — 2021", date(2020, 1, 1), date(2021, 12, 1), False),  # не март
     ],
 )
 def test_parse_dates(raw: str, start: date, end: date | None, current: bool) -> None:
     assert parse_dates(raw) == (start, end, current)
 
 
-@pytest.mark.parametrize("raw", ["", "давно", "сейчас — 2020", "2023 — 2020"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "давно",
+        "сейчас — 2020",
+        "2023 — 2020",
+        "2020 — что-то непонятное",
+        "март 2023 —",
+        "с мая 2020 по неизвестно",
+    ],
+)
 def test_parse_dates_bad(raw: str) -> None:
     assert parse_dates(raw) is None
 
@@ -57,6 +79,12 @@ def test_parse_dates_bad(raw: str) -> None:
         ("(1,5 года)", 18),
         ("10 месяцев", 10),
         ("1 год", 12),
+        ("2 years", 24),
+        ("1 year 6 months", 18),
+        ("5+ лет", 60),
+        ("полгода", 6),
+        ("1,5 года", 18),
+        ("год и 3 месяца", 15),
         ("без опыта", None),
         (None, None),
     ],
@@ -114,17 +142,32 @@ def test_future_end_clipped_by_today() -> None:
 
 
 def test_declared_mismatch() -> None:
+    f = facts([period("март 2020 — февраль 2023", "(2 года)")])
+    found = check_declared(f, TODAY)
+    assert [(d.period, d.declared, d.computed) for d in found] == [(0, 24, 36)]
+    assert snapshot_date(f, TODAY) is None
+
+
+def test_current_declared_less_is_old_resume() -> None:
     f = facts(
         [period("март 2023 — настоящее время", "(2 года)"), period("сентябрь 2021 — февраль 2023")]
     )
-    found = check_declared(f, TODAY)
-    assert [(d.period, d.declared, d.computed) for d in found] == [(0, 24, 45)]
+    assert check_declared(f, TODAY) == []
+    assert snapshot_date(f, TODAY) == date(2025, 2, 1)  # 45 − 24 = 21 мес. назад
+    assert snapshot_note(f, TODAY) == "резюме, похоже, от февраля 2025"
 
 
-def test_declared_total_mismatch() -> None:
+def test_current_declared_more_is_mismatch() -> None:
     f = facts([period("Янв 2024 – сейчас", "2 года 10 мес")], "5 лет")
     [d] = check_declared(f, TODAY)
     assert (d.period, d.declared, d.computed) == (None, 60, 35)
+    assert snapshot_date(f, TODAY) is None
+
+
+def test_total_declared_less_with_current_is_old_resume() -> None:
+    f = facts([period("Янв 2024 – сейчас")], "2 года")
+    assert check_declared(f, TODAY) == []
+    assert snapshot_date(f, TODAY) == date(2025, 12, 1)
 
 
 def test_skill_months() -> None:
@@ -208,6 +251,7 @@ def test_extract_synthetic(tmp_path: Path) -> None:
     p = f.periods[0]
     assert (p.start, p.end, p.current, p.declared_months) == (date(2023, 3, 1), None, True, 24)
     assert f.periods[1].start is None
+    assert f.periods[2].start is None  # дат нет в строках места — не разбираем
     assert f.letter_lines == [3]
     assert f.city == "Казань" and f.education[0].year == 2021
     assert any("Когда-то давно" in w for w in f.warnings)
@@ -253,8 +297,8 @@ def test_case_semenov(tmp_path: Path) -> None:
     ]
     f = run(doc, reply(periods), tmp_path)
     assert f.warnings == []
-    [d] = check_declared(f, TODAY)
-    assert (d.period, d.declared, d.computed) == (0, 24, 45)
+    assert check_declared(f, TODAY) == []  # заявлено меньше у текущего места — старое резюме
+    assert snapshot_note(f, TODAY) == "резюме, похоже, от февраля 2025"
 
 
 @needs_data
@@ -272,3 +316,14 @@ def test_case_ivanov_overlap(tmp_path: Path) -> None:
     assert f.warnings == []
     assert total_months(f.periods, TODAY) == 35
     assert check_declared(f, TODAY) == []
+
+
+def test_extract_declared_not_in_text(tmp_path: Path) -> None:
+    text = ["Опыт работы — 3 года", "ООО Ромашка, май 2021 — май 2024"]
+    doc = Document(name="r", lines=[Line(n=i + 1, text=t) for i, t in enumerate(text)])
+    periods = [markup((2, 2), "май 2021 — май 2024", "(5 лет)")]
+    f = run(doc, reply(periods, declared_total_raw="Опыт работы — 10 лет"), tmp_path)
+    assert f.periods[0].start == date(2021, 5, 1)
+    assert f.periods[0].declared_months is None
+    assert f.declared_total_months is None
+    assert len(f.warnings) == 2

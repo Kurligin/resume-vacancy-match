@@ -7,6 +7,7 @@ from rapidfuzz import fuzz
 
 from rvm.facts import ResumeFacts
 from rvm.models import Document, Evidence, Line, MatchRow
+from rvm.refs.skills import canonical
 
 LETTER_BLOCK = "Сопроводительное письмо"
 FUZZ_MIN = 90
@@ -55,15 +56,19 @@ def locate(line: Line, quote: str) -> str | None:
     """Кусок настоящей строки, который цитирует модель, или None.
 
     Точное вхождение по границам слов (не \\b: ломает «C++», «1С»), иначе нечёткое
-    в пределах строки — порог ниже для OCR. Цитата от 3 символов, длиннее строки — нет.
+    в пределах строки — порог ниже для OCR. Цитата от 3 символов (короче — только навык
+    справочника и только точно: «1С», «Go»), длиннее строки — нет.
     """
     q, _ = _mapped(quote)
     t, idx = _mapped(line.text)
-    if len(q) < 3 or not re.search(r"\w", q) or len(q) > len(t):
+    short = len(q) < 3
+    if (short and canonical(quote) is None) or not re.search(r"\w", q) or len(q) > len(t):
         return None
     m = re.search(rf"(?<!\w){re.escape(q)}(?!\w)", t)
     if m:
         a, b = m.span()
+    elif short:
+        return None
     else:
         al = fuzz.partial_ratio_alignment(q, t)
         a, b = _widen(t, al.dest_start, al.dest_end)
