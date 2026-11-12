@@ -170,8 +170,7 @@ def analyze(
         "created_at": datetime.now(UTC),
     }
     try:
-        for m in (masked_resume, *masked_vacs.values()):
-            assert_clean(m)
+        assert_clean(masked_resume)
     except PrivacyError as err:
         if not is_local(llm):
             return Report(
@@ -186,6 +185,19 @@ def analyze(
                 **base,
             )
         warnings.append(f"обезличивание неполное ({err}), модель локальная — продолжаем")
+    # ложное срабатывание на вакансии не роняет отчёт: пропускаем только эту вакансию
+    for vid, mv in list(masked_vacs.items()):
+        try:
+            assert_clean(mv)
+        except PrivacyError as err:
+            name = vacancies[vid].name
+            if is_local(llm):
+                warnings.append(f"{name}: обезличивание неполное ({err}), модель локальная")
+                continue
+            del masked_vacs[vid]
+            warnings.append(
+                f"{name}: в тексте вакансии остались контакты, проверьте файл — вакансия пропущена"
+            )
 
     doc = masked_resume.doc
     facts = ResumeFacts()

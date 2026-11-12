@@ -6,6 +6,7 @@ import pytest
 
 from rvm.models import Document, Line
 from rvm.privacy import PrivacyError, assert_clean, contact_hash, mask, swap_identity
+from rvm.refs.skills import find_in_lines
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
 needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
@@ -190,7 +191,7 @@ def test_swap_identity_filename_overlapping_names() -> None:
         "123-45-67",
         "9161234567",
         "сайт ivanov.ru",
-        "@",
+        "@ivan_dev в телеграме",
         "91 61 23 45 67",
         "socket.ivanov.ru",
     ],
@@ -200,6 +201,36 @@ def test_assert_clean_rough_checks(planted: str) -> None:
     m.doc.lines[0].text += f" {planted}"
     with pytest.raises(PrivacyError):
         assert_clean(m)
+
+
+def test_tech_tokens_are_not_contacts() -> None:
+    lines = (
+        "Java: @Override, @Component, @RestController",
+        "Вёрстка: @media, @import",
+        "Node.js, Socket.io, ASP.NET, Vue.js",
+        "Облако: Mail.ru Cloud",
+    )
+    m = mask(doc_of(*lines))
+    assert [ln.text for ln in m.doc.lines] == list(lines)
+    assert_clean(m)
+    found = {h.canonical for h in find_in_lines(m.doc.lines)}
+    assert {"Node.js", "Socket.IO", ".NET", "Vue", "VK Cloud"} <= found
+
+
+def test_contacts_near_tech_still_masked() -> None:
+    m = mask(
+        doc_of(
+            "Почта ivan@mail.ru, запасная ivan@mail",
+            "Пишите @ivan_dev в телеграме",
+            "Код: github.com/ivan, Socket.io",
+        )
+    )
+    text = text_of(m.doc)
+    for leak in ("ivan@", "ivan_dev", "github.com/ivan"):
+        assert leak not in text
+    assert text.count("[почта]") == 2 and text.count("[ссылка]") == 2
+    assert "Socket.io" in text
+    assert_clean(m)
 
 
 def test_sites_without_scheme_masked() -> None:
