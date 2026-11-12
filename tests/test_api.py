@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from test_analyze import RoutingFake
 
 import rvm
-from rvm.api import create_app
+from rvm.api import auth, create_app
 from rvm.llm import LLMClient
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
@@ -52,6 +52,7 @@ HEADERS = {"X-Requested-With": "test"}
 @pytest.fixture
 def app(tmp_path: Path, fake: SwitchFake, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("RVM_SECRET", "тестовый-секрет")
+    monkeypatch.setenv("RVM_DEMO_LOGIN", "1")
     llm = LLMClient(
         fake, base_url=EXTERNAL, model="fake", mode="live", cache_path=tmp_path / "c.db"
     )
@@ -219,8 +220,18 @@ def test_case_files_card(api: TestClient) -> None:
     assert len({e["vacancy_id"] for e in card["evaluations"]}) == 3
 
 
-def test_login_required(app: FastAPI) -> None:
+def test_password_hash() -> None:
+    h = auth.hash_password("секрет")
+    assert h.startswith("scrypt:") and "секрет" not in h
+    assert auth.verify_password("секрет", h) and not auth.verify_password("другой", h)
+    assert not auth.verify_password("секрет", "мусор")
+
+
+def test_login_required(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVM_PASSWORD_ANNA", auth.hash_password("anna-demo"))
     with client(app) as anon:
+        assert anon.get("/api/login-options").json() == {"demo": True}
+        assert anon.post("/api/login", json={"login": "oleg", "password": ""}).status_code == 401
         assert anon.get("/api/health").status_code == 200
         assert anon.get("/api/candidates").status_code == 401
         assert anon.get("/api/me").status_code == 401
@@ -346,9 +357,12 @@ def test_upload_limits_before_unpack(api: TestClient, monkeypatch: pytest.Monkey
 def test_starts_in_demo_without_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    for k in ("LLM_API_KEY", "LLM_MODE", "RVM_SECRET"):
+    for k in ("LLM_API_KEY", "LLM_MODE", "RVM_SECRET", "RVM_DEMO_LOGIN"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("RVM_CACHE", str(tmp_path / "cache.sqlite"))
     with TestClient(create_app(db=tmp_path / "rvm.sqlite"), base_url="http://localhost") as c:
         assert c.get("/api/health").json()["mode"] == "demo"
+        assert c.get("/api/login-options").json() == {"demo": False}
+        r = c.post("/api/login", json={"role": "recruiter"}, headers=HEADERS)
+        assert r.status_code == 403 and "демо-вход отключён" in r.text
     assert "LLM_API_KEY" in caplog.text and "RVM_SECRET" in caplog.text

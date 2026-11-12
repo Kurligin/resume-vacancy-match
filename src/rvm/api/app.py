@@ -48,7 +48,7 @@ from rvm.store import CandidateStatus
 
 MAX_BATCH = 300  # файлов в одной пачке
 MAX_REQUEST_BYTES = 200 * 2**20  # распакованный объём одного запроса на загрузку
-OPEN_PATHS = {"/api/health", "/api/login"}
+OPEN_PATHS = {"/api/health", "/api/login", "/api/login-options"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 log = logging.getLogger("rvm.api")
 STATIC = Path(__file__).parent / "static"
@@ -245,7 +245,8 @@ def create_app(
     db: Path | None = None, llm: LLMClient | None = None, today: date | None = None
 ) -> FastAPI:
     """Настройки по умолчанию из окружения: RVM_DB, RVM_TODAY, LLM_* (как у клиента модели),
-    RVM_SECRET (подпись сессий), RVM_ALLOWED_HOSTS (домены стенда через запятую)."""
+    RVM_SECRET (подпись сессий), RVM_ALLOWED_HOSTS (домены стенда через запятую),
+    RVM_DEMO_LOGIN=1 (вход по роли без пароля), RVM_PASSWORD_<ЛОГИН> (хэши паролей)."""
     env = os.environ
     db = db or Path(env.get("RVM_DB", "var/rvm.sqlite"))
     store.init(db)
@@ -258,6 +259,9 @@ def create_app(
     if not env.get("RVM_SECRET"):
         log.warning("RVM_SECRET не задан — ключ сессий случайный, вход сбросится при перезапуске")
     secret = env.get("RVM_SECRET", "").encode() or secrets.token_bytes(32)
+    demo_login = env.get("RVM_DEMO_LOGIN") == "1"
+    if demo_login:
+        log.warning("RVM_DEMO_LOGIN=1 — вход по роли без пароля открыт любому")
     hosts = ["localhost", "127.0.0.1"] + [
         h.strip() for h in env.get("RVM_ALLOWED_HOSTS", "").split(",") if h.strip()
     ]
@@ -369,6 +373,8 @@ def create_app(
     @app.post("/api/login", summary="Вход: логин и пароль или демо-вход по роли")
     def login(body: LoginBody, response: Response) -> auth.User:
         if body.role:
+            if not demo_login:
+                raise HTTPException(403, "демо-вход отключён")
             user = auth.demo_user(body.role)
         else:
             user = auth.check_password(body.login, body.password)
@@ -378,6 +384,10 @@ def create_app(
         # shortcut: без Secure — стенд за Caddy и localhost по http; включить, если только https
         response.set_cookie(auth.COOKIE, token, max_age=auth.MAX_AGE, httponly=True, samesite="lax")
         return user
+
+    @app.get("/api/login-options", summary="Показывать ли кнопки демо-входа")
+    def login_options() -> dict[str, bool]:
+        return {"demo": demo_login}
 
     @app.post("/api/logout", summary="Выход")
     def logout(response: Response, _: Anyone) -> dict[str, bool]:
