@@ -12,7 +12,8 @@ from rvm.ingest import load_path
 from rvm.llm import LLMClient
 from rvm.models import Document, Evidence, Line, MatchRow, ReqKind, Requirement, Section, Status
 from rvm.pipeline.match import match
-from rvm.pipeline.verify import quote_ok, verified_share
+from rvm.pipeline.verify import check, quote_ok, verified_share
+from rvm.refs.skills import mentioned
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
 needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
@@ -258,3 +259,120 @@ def test_experience_by_dates_despite_bad_quote(tmp_path: Path) -> None:
     bad = [ans("R1", "full", [(5, "5 лет в Google")], self_claim=True)]
     rows, _ = run(reqs, [bad, bad], tmp_path)
     assert rows["R1"].status == Status.FULL and rows["R1"].flags == []
+
+
+# --- R1d: строгость проверки ---
+
+
+def test_no_without_negation_is_unknown(tmp_path: Path) -> None:
+    rows, _ = run([req("R1", "React")], [[ans("R1", "no", [(6, "Vue 3")])]], tmp_path)
+    assert rows["R1"].status == Status.UNKNOWN and "no_without_negation" in rows["R1"].flags
+
+
+def test_short_quote_rejected() -> None:
+    line = Line(n=1, text="Разработка на Vue 3 и Nuxt 3")
+    assert not quote_ok(line, "а")
+    assert not quote_ok(line, "Ра")
+    assert not quote_ok(line, "зработка")  # не целое слово
+    assert quote_ok(line, "Vue 3")
+
+
+def test_evidence_quote_is_line_text() -> None:
+    ev = check(DOC, FACTS, 6, "разработка на vue 3 и nuxt 3 (ssr)")
+    assert ev and ev.quote == "Разработка на Vue 3 и Nuxt 3 (SSR)"
+    ocr = Document(name="o", lines=[Line(n=1, text="Стек: Taiiwind CSS, Vue", ocr=True)])
+    ev = check(ocr, ResumeFacts(), 1, "Tailwind CSS")
+    assert ev and ev.quote == "Taiiwind CSS"
+    # выдумка длиннее строки не проходит даже нечётко
+    assert check(DOC, FACTS, 8, "Внимателен к деталям, ответственный. Лидер команды.") is None
+
+
+def test_skill_mention_word_boundaries() -> None:
+    assert not mentioned("Go", "Google Cloud, Google Analytics")
+    assert mentioned("Go", "Бэкенд на Go и Python")
+    assert mentioned("golang", "Бэкенд на Go")
+    assert mentioned("C++", "Языки: C++, Python")
+    assert not mentioned("Java", "JavaScript")
+
+
+def test_skill_experience_not_found_in_google(tmp_path: Path) -> None:
+    doc = Document(
+        name="g",
+        lines=[
+            Line(n=1, text="ООО Google, март 2025 — настоящее время"),
+            Line(n=2, text="Google Ads"),
+        ],
+    )
+    facts = ResumeFacts(
+        periods=[
+            Period(
+                line_from=1,
+                line_to=2,
+                dates_raw="март 2025 — настоящее время",
+                start=date(2025, 3, 1),
+                current=True,
+            )
+        ]
+    )
+    reqs = [req("R1", "Go от 1 года", ReqKind.EXPERIENCE, 1)]
+    rows, _ = run(reqs, [[ans("R1", "unknown", skill="Go")]], tmp_path, doc, facts)
+    assert rows["R1"].status == Status.UNKNOWN
+
+
+def test_skill_requirement_without_valid_skill_not_general(tmp_path: Path) -> None:
+    reqs = [
+        req("R1", "Vue от 1 года", ReqKind.EXPERIENCE, 1),  # навык модели не из требования
+        req("R2", "Vue от 1 года", ReqKind.EXPERIENCE, 1),  # навык не назван
+    ]
+    reply = [ans("R1", "unknown", skill="Angular"), ans("R2", "unknown")]
+    rows, _ = run(reqs, [reply], tmp_path)
+    assert rows["R1"].status == Status.UNKNOWN and rows["R2"].status == Status.UNKNOWN
+
+
+def test_experience_below_half_is_no(tmp_path: Path) -> None:
+    facts = ResumeFacts(
+        periods=[
+            Period(
+                line_from=5,
+                line_to=6,
+                dates_raw="ноябрь 2026",
+                start=date(2026, 11, 1),
+                current=True,
+            )
+        ]
+    )
+    reqs = [
+        req("R1", "опыт от 3 лет", ReqKind.EXPERIENCE, 3),
+        req("R2", "опыт от 2 мес.", ReqKind.EXPERIENCE, 2 / 12),
+    ]
+    rows, _ = run(reqs, [[ans("R1", "unknown"), ans("R2", "unknown")]], tmp_path, facts=facts)
+    assert rows["R1"].status == Status.NO and rows["R1"].evidence[0].line == 5
+    assert rows["R2"].status == Status.PARTIAL  # 1 из 2 мес. — ровно половина
+
+
+def test_irrelevant_quote_flagged(tmp_path: Path) -> None:
+    reqs = [req("R1", "Tailwind CSS"), req("R2", "Vue.js", ReqKind.TOOL)]
+    reply = [ans("R1", "full", [(6, "Vue 3")]), ans("R2", "full", [(6, "Vue 3")])]
+    rows, _ = run(reqs, [reply], tmp_path)
+    assert rows["R1"].status == Status.PARTIAL and "check_relevance" in rows["R1"].flags
+    assert rows["R2"].status == Status.FULL and rows["R2"].flags == []
+
+
+def test_letter_only_skill_is_self_claim(tmp_path: Path) -> None:
+    rows, _ = run([req("R1", "Vue")], [[ans("R1", "full", [(3, "Vue знаю")])]], tmp_path)
+    assert rows["R1"].status == Status.PARTIAL and "self_claim" in rows["R1"].flags
+
+
+def test_exceeds_quote_only_when_full(tmp_path: Path) -> None:
+    good = {"why": "SSR", "line": 6, "quote": "Nuxt 3 (SSR)"}
+    rows, _ = run(
+        [req("R1", "Nuxt")], [[ans("R1", "partial", [(6, "Nuxt 3")], exceeds=good)]], tmp_path
+    )
+    assert [e.quote for e in rows["R1"].evidence] == ["Nuxt 3"]
+
+
+def test_llm_error_rows_unknown(tmp_path: Path) -> None:
+    reqs = [req("R1", "Vue"), req("R2", "React")]
+    rows, _ = run(reqs, [["not json"], ["still not json"]], tmp_path)
+    for r in rows.values():
+        assert r.status == Status.UNKNOWN and r.flags == ["llm_error"]

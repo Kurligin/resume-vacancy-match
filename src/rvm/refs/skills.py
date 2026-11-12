@@ -133,3 +133,13 @@ def hints(text: str) -> list[str]:
     """Канонические имена навыков из текста — подсказки для промпта, без повторов."""
     lines = [Line(n=i, text=t) for i, t in enumerate(text.splitlines(), 1)]
     return list(dict.fromkeys(h.canonical for h in find_in_lines(lines)))
+
+
+def mentioned(term: str, text: str) -> bool:
+    """Навык в тексте целым словом: по синонимам справочника с его правилами регистра,
+    а термина нет в справочнике — как есть, без регистра. «Go» ≠ «Google»."""
+    name = canonical(term)
+    if name:
+        return _load()[2][name].search(text) is not None
+    needle = re.escape(term.strip().lower())
+    return bool(needle) and re.search(rf"(?<!\w){needle}(?!\w)", text.lower()) is not None

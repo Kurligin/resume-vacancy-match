@@ -5,6 +5,7 @@ from datetime import date
 
 from rvm.facts import Discrepancy, Period, ResumeFacts
 from rvm.models import Document
+from rvm.refs.skills import mentioned
 
 MONTH = {"янв": 1, "фев": 2, "мар": 3, "апр": 4, "май": 5, "мая": 5, "мае": 5, "июн": 6}
 MONTH |= {"июл": 7, "авг": 8, "сен": 9, "окт": 10, "ноя": 11, "дек": 12}
@@ -82,14 +83,14 @@ def total_months(periods: list[Period], today: date) -> int:
 
 
 def skill_months(term: str, facts: ResumeFacts, doc: Document, today: date) -> int:
-    """Стаж по местам работы, в строках которых встречается навык (без учёта регистра)."""
-    needle = term.lower()
-    hits = [
-        p
-        for p in facts.periods
-        if any(needle in ln.text.lower() for ln in doc.lines if p.line_from <= ln.n <= p.line_to)
-    ]
-    return total_months(hits, today)
+    """Стаж по местам работы, в строках которых навык упомянут целым словом (см. mentioned)."""
+    return total_months([p for p in facts.periods if period_mentions(p, doc, [term])], today)
+
+
+def period_mentions(p: Period, doc: Document, terms: list[str]) -> bool:
+    """Хоть один вариант навыка упомянут в строках места работы."""
+    lines = [ln.text for ln in doc.lines if p.line_from <= ln.n <= p.line_to]
+    return any(mentioned(t, text) for t in terms for text in lines)
 
 
 def check_declared(facts: ResumeFacts, today: date) -> list[Discrepancy]:
