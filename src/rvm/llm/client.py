@@ -137,7 +137,13 @@ class LLMClient:
             if sort := os.environ.get("LLM_PROVIDER_SORT", "throughput"):
                 provider["sort"] = sort
             kwargs["extra_body"] = {"provider": provider}
-            if self._reasoning_off:
+            effort = os.environ.get("LLM_REASONING_EFFORT") or (
+                "low" if "gpt-oss" in self.model else ""
+            )
+            if effort:
+                # модели, которые рассуждают всегда (gpt-oss): только минимум рассуждений
+                kwargs["extra_body"]["reasoning"] = {"effort": effort}
+            elif self._reasoning_off:
                 # гибридные модели (qwen3) иначе «думают» в десятки раз дольше ответа
                 kwargs["extra_body"]["reasoning"] = {"enabled": False}
         elif "yandex" in self.base_url:
@@ -153,6 +159,10 @@ class LLMClient:
                 self._reasoning_off = False
                 return self._call(messages, schema, json_schema)
             except openai.BadRequestError:
+                if self._reasoning_off and "reasoning" in kwargs.get("extra_body", {}):
+                    # параметр рассуждений не принят — повторяем без него, схему не теряем
+                    self._reasoning_off = False
+                    return self._call(messages, schema, json_schema)
                 self._json_object = True
         hint = f"Ответь только JSON по схеме:\n{json.dumps(json_schema, ensure_ascii=False)}"
         if messages and messages[0]["role"] == "system":

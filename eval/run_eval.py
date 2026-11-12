@@ -182,6 +182,8 @@ def main() -> int:
     def one(res: dict[str, Any]) -> None:
         rep = analyze(load_path(data / res["file"]), vacancies, llm, today, source_name=res["file"])
         print(f"{res['label']}: {rep.error or 'готово'} · {rep.elapsed_s:.0f} с")
+        for w in list(dict.fromkeys(rep.warnings))[:2]:
+            print(f"  ! {w[:300]}")
         if not rep.error:
             reports[res["label"]] = rep.model_dump(mode="json")
 
