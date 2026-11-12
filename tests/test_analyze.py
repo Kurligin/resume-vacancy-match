@@ -123,6 +123,10 @@ def test_report_and_no_pii_in_messages(tmp_path: Path) -> None:
     assert report.status == ReportStatus.OK
     assert {v.id for v in report.vacancies} == {"v1", "v2"}
     assert all(len(v.rows) == 2 for v in report.vacancies)
+    # модель вернула негодный ответ на выводы — запасной вариант из таблицы, вопросы с id
+    for v in report.vacancies:
+        assert v.insights and v.insights.recommendation.text and v.letters
+        assert v.questions and all(q.requirement_id for q in v.questions.items)
     assert report.resume.original[0].text == "Сидоров Пётр"
     assert "Сидоров" not in report.resume.lines[0].text
     sent = fake.sent()

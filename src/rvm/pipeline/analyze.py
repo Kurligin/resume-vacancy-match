@@ -16,8 +16,13 @@ from rvm.experience import check_declared, snapshot_note, total_months
 from rvm.facts import Discrepancy, ResumeFacts
 from rvm.llm import LLMClient, LLMError
 from rvm.models import Document, FileStatus, Line, MatchRow, Requirement, Status
+from rvm.pipeline import explain as explain_mod
 from rvm.pipeline import extract_resume, extract_vacancy
 from rvm.pipeline import match as match_mod
+from rvm.pipeline import questions as questions_mod
+from rvm.pipeline.explain import Insights, build_checks, explain
+from rvm.pipeline.letters import Letter, letters
+from rvm.pipeline.questions import Questions, questions
 from rvm.pipeline.verify import LETTER_BLOCK
 from rvm.privacy import PrivacyError, assert_clean, mask
 from rvm.refs.skills import canonical, entries
@@ -51,6 +56,9 @@ class VacancyResult(BaseModel):
     place: int | None
     why_not_first: list[Contribution] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    insights: Insights | None = None
+    questions: Questions | None = None
+    letters: list[Letter] = Field(default_factory=list)
 
 
 class Facts(BaseModel):
@@ -81,6 +89,8 @@ PROMPT_VERSIONS = {
     "extract_vacancy": extract_vacancy.PROMPT_VERSION,
     "extract_resume": extract_resume.PROMPT_VERSION,
     "match": match_mod.PROMPT_VERSION,
+    "explain": explain_mod.PROMPT_VERSION,
+    "questions": questions_mod.PROMPT_VERSION,
 }
 
 
@@ -235,10 +245,26 @@ def analyze(
         )
 
     ranking = rank_vacancies({vid: r.score for vid, r in results.items()}, applied)
+    pair_facts = Facts(
+        resume=facts,
+        total_months=total_months(facts.periods, today),
+        discrepancies=check_declared(facts, today),
+        snapshot_note=snapshot_note(facts, today),
+    )
+    checks = build_checks(facts, pair_facts.discrepancies, pair_facts.snapshot_note)
+    rd = ranking.redirect
     ordered = []
     for p in ranking.places:
         r = results[p.id]
         r.place, r.why_not_first = p.place, p.why_not_first
+        # выводы и письма — по обезличенной таблице пары
+        to = rd.to_vacancy if rd and rd.from_vacancy == r.id else None
+        to_masked = to and title_of(masked_vacs[to].doc)  # модели — обезличенное название
+        r.insights = explain(
+            r.requirements, r.rows, r.score, checks, pair_facts.total_months, to_masked, llm
+        )
+        r.questions = questions(r.requirements, r.rows, checks, llm) if r.rows else None
+        r.letters = letters(r.title, r.requirements, r.rows, r.score, to and results[to].title)
         ordered.append(r)
     warnings += facts.warnings
     return Report(
@@ -246,12 +272,7 @@ def analyze(
         vacancies=ordered,
         redirect=ranking.redirect,
         none_fit=ranking.none_fit,
-        facts=Facts(
-            resume=facts,
-            total_months=total_months(facts.periods, today),
-            discrepancies=check_declared(facts, today),
-            snapshot_note=snapshot_note(facts, today),
-        ),
+        facts=pair_facts,
         warnings=warnings,
         elapsed_s=round(time.time() - t0, 2),
         **base,
