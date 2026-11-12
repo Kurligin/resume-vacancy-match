@@ -23,7 +23,7 @@ EXTERNAL = "https://openrouter.ai/api/v1"
 
 @pytest.fixture(autouse=True)
 def _salt(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RVM_HASH_SALT", "test-salt")
+    monkeypatch.setenv("RVM_HASH_SALT", "тестовый-ключ-16+символов")
 
 
 class RoutingFake:
