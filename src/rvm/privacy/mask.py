@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from rvm.models import Document, Line
+from rvm.refs.skills import canonical
 
 _LINK = re.compile(
     r"(?i)(?:https?://|www\.)\S+"
@@ -25,11 +26,17 @@ _LINK = re.compile(
 # сайт без схемы: личный (ivanov.ru) от сайта работодателя не отличить — маскируем любой
 # начало только с начала токена: иначе на длинном «a-a-a…» квадратичный откат
 _SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:ru|com|рф|me|io|org|net|su)\b(?:/\S*)?")
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# почтовые домены, которые пишут без зоны: «ivan@mail»
+_MAILBOX = r"(?:mail|gmail|yandex|ya|bk|inbox|list|rambler|outlook|hotmail|icloud|yahoo|proton)"
+_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:[\w-]+(?:\.[\w-]+)+|{_MAILBOX}\b)")
 _PHONE = re.compile(
     r"(?<![\w+])(?:(?:\+\d{1,3}|[78])[\s-]*\(?\d{3}\)?|\(\d{3}\))(?:[\s-]*\d){7}(?!\d)"
 )
 _NICK = re.compile(r"(?<![\w.])@[A-Za-z]\w{3,}")
+# «@ник» — контакт только рядом с мессенджером или словом «контакты»: иначе это @Override, @media
+_MESSENGER = re.compile(
+    r"(?i)telegram|телеграм|телега|instagram|инстаграм|whatsapp|ватсап|контакт|\b(?:tg|тг|вк|vk)\b"
+)
 _BIRTH = re.compile(
     r"(?i)(?:дата\s+рождения|родил(?:ся|ась))\s*:?\s*(?:в\s+)?"
     r"(?:\d{1,2}[\s./-]*(?:\d{1,2}|[а-яё]+)[\s./-]*)?\d{2,4}(?:\s*(?:года|году|г\.|г\b))?"
@@ -52,14 +59,14 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("почта", _EMAIL),
     ("ссылка", _SITE),
     ("телефон", _PHONE),
-    ("ссылка", _NICK),
     ("дата рождения", _BIRTH),
     ("возраст", _AGE),
     ("пол", _SEX),
     ("адрес", _ADDRESS),
 ]
-# Грубые проверки assert_clean, независимые от маски: цепочка цифр с разделителями, «@», домены
+# Грубые проверки assert_clean, независимые от маски: цепочка цифр с разделителями, почта, домены
 _DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
+_ROUGH_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:\w[\w-]*\.\w{{2,}}|{_MAILBOX}\b)")
 _DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:ru|com|рф|me|io|org|net|su)\b")
 _MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
@@ -136,11 +143,20 @@ def _name_tokens(text: str, known: list[set[str]]) -> list[tuple[int, int, int |
     return out
 
 
+def _is_skill(text: str, m: re.Match[str]) -> bool:
+    """Доменоподобный токен — навык из справочника (Socket.io, ASP.NET, Mail.ru Cloud)."""
+    token = m.group().split("/")[0]
+    tail = re.match(r"\s+\w+", text[m.end() :])
+    return canonical(token) is not None or bool(tail and canonical(token + tail.group()))
+
+
 def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, str]]]:
     hits: list[tuple[str, str]] = []
 
     def sub(kind: str, pattern: re.Pattern[str], s: str) -> str:
         def rep(m: re.Match[str]) -> str:
+            if pattern is _SITE and _is_skill(s, m):
+                return m.group()
             hits.append((kind, m.group()))
             return f"[{kind}]"
 
@@ -148,8 +164,11 @@ def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, s
 
     near_age = bool(_SEX.search(text) or _BIRTH.search(text)) or "[пол]" in text
     near_age = near_age or "[дата рождения]" in text
+    messenger = bool(_MESSENGER.search(text))
     for kind, pattern in _PATTERNS:
         text = sub(kind, pattern, text)
+    if messenger:
+        text = sub("ссылка", _NICK, text)
     if near_age:
         text = sub("возраст", _AGE_NEAR, text)
     for start, end, _ in reversed(_name_tokens(text, known)):
@@ -216,9 +235,10 @@ def _rough_hits(text: str) -> list[str]:
     for m in _DIGIT_RUN.finditer(text):
         if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
             hits.append("цифры")
-    if "@" in text:
-        hits.append("@")
-    hits += ["домен"] * len(_DOMAIN.findall(text))
+    hits += ["почта"] * len(_ROUGH_EMAIL.findall(text))
+    if _MESSENGER.search(text):
+        hits += ["ник"] * len(_NICK.findall(text))
+    hits += ["домен" for m in _DOMAIN.finditer(text) if not _is_skill(text, m)]
     return hits
 
 

@@ -23,7 +23,7 @@ EXTERNAL = "https://openrouter.ai/api/v1"
 
 @pytest.fixture(autouse=True)
 def _salt(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RVM_HASH_SALT", "test-salt")
+    monkeypatch.setenv("RVM_HASH_SALT", "тестовый-ключ-16+символов")
 
 
 class RoutingFake:
@@ -165,6 +165,22 @@ def test_llm_error_in_one_pair(tmp_path: Path) -> None:
     assert all(r.status == Status.UNKNOWN and "llm_error" in r.flags for r in by_id["v2"].rows)
     assert not any("llm_error" in r.flags for r in by_id["v1"].rows)
     assert by_id["v1"].place is not None
+
+
+def test_vacancy_with_leftover_contact_skipped(tmp_path: Path) -> None:
+    vacs = {
+        **VACANCIES,
+        "v3": doc_of("Вакансия 3.docx", "Аналитик", "Контактное лицо: звонить 916 123 45 67"),
+    }
+    fake = RoutingFake()
+    report = analyze(RESUME, vacs, make_llm(tmp_path, fake), TODAY)
+    assert report.status == ReportStatus.OK
+    assert {v.id for v in report.vacancies} == {"v1", "v2"}
+    assert any("Вакансия 3.docx" in w and "остались контакты" in w for w in report.warnings)
+    assert "123 45 67" not in fake.sent()
+    # отклик на пропущенную вакансию — рейтинг всё равно строится
+    report = analyze(RESUME, vacs, make_llm(tmp_path, fake), TODAY, applied="v3")
+    assert {v.id for v in report.vacancies} == {"v1", "v2"}
 
 
 def test_applied_param_and_heuristic() -> None:
