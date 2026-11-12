@@ -5,13 +5,13 @@ from rvm.pipeline import analyze, extract_resume, extract_vacancy, match
 
 def test_v2_prompts_connected_v1_kept() -> None:
     prompts = files("rvm") / "prompts"
-    for mod, name in (
-        (extract_vacancy, "extract_vacancy"),
-        (match, "match"),
-        (extract_resume, "extract_resume"),
+    for mod, name, ver in (
+        (extract_vacancy, "extract_vacancy", "v2"),
+        (match, "match", "v3"),
+        (extract_resume, "extract_resume", "v2"),
     ):
-        assert mod.PROMPT_VERSION == f"{name}.v2"
-        assert analyze.PROMPT_VERSIONS[name] == f"{name}.v2"
+        assert mod.PROMPT_VERSION == f"{name}.{ver}"
+        assert analyze.PROMPT_VERSIONS[name] == f"{name}.{ver}"
         assert mod.PROMPT.read_text(encoding="utf-8").strip()
         assert (prompts / f"{name}.v1.md").is_file()  # старая версия — для сравнения замеров
 

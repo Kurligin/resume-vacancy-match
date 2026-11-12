@@ -3,7 +3,9 @@
 import re
 from collections.abc import Callable
 from datetime import date
+from functools import cache
 from importlib.resources import files
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -14,7 +16,7 @@ from rvm.models import Document, Evidence, MatchRow, ReqKind, Requirement, Statu
 from rvm.pipeline.verify import check, normalize
 from rvm.refs.skills import hints, mentioned
 
-PROMPT_VERSION = "match.v2"
+PROMPT_VERSION = "match.v3"
 PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 SELF_BLOCKS = {"Обо мне"}
 # признаки отрицания: «нет» модели без них — не «нет»
@@ -25,6 +27,15 @@ NEGATION = re.compile(
 )
 # общие слова требований: совпадение по ним не делает цитату относящейся к делу
 _GENERIC = {"опыт", "знани", "умени", "навык", "владе", "работ", "испол", "понима", "experience"}
+
+# то же по леммам, для проверки цитаты «нет»
+_GENERIC_LEMMAS = {
+    "опыт", "знание", "знать", "умение", "уметь", "навык", "владение", "владеть", "работа",
+    "работать", "использование", "использовать", "понимание", "понимать", "готовый",
+    "готовность", "наличие", "уровень", "год", "experience",
+}  # fmt: skip
+# служебные части речи: предлоги, союзы, частицы, местоимения, числительные, «нет»
+_FUNCTION_POS = {"PREP", "CONJ", "PRCL", "NPRO", "INTJ", "NUMR", "PRED"}
 
 Skills = Callable[[str], list[str]]  # навык → варианты написания (справочник синонимов)
 
@@ -145,6 +156,36 @@ def _relevant(req: Requirement, evidence: list[Evidence]) -> bool:
     return any(words & _stems(e.quote) for e in evidence)
 
 
+@cache
+def _morph() -> Any:
+    import pymorphy3
+
+    return pymorphy3.MorphAnalyzer()
+
+
+def _lemmas(text: str) -> set[str]:
+    """Значимые леммы: без служебных слов, чисел и общих слов требований."""
+    out = set()
+    for w in re.findall(r"\w+", normalize(text).replace("ё", "е")):
+        p = _morph().parse(w)[0]
+        if not w.isdigit() and p.tag.POS not in _FUNCTION_POS:
+            out.add(p.normal_form.replace("ё", "е"))
+    return out - _GENERIC_LEMMAS
+
+
+def _about(req: Requirement, evidence: list[Evidence]) -> bool:
+    """Цитата «нет» про это требование: навык требования (с синонимами справочника)
+    или общее значимое слово с учётом падежей."""
+    names = hints(req.text)
+    words = _lemmas(req.text)
+    return any(
+        any(mentioned(n, e.quote) for n in names) or words & _lemmas(e.quote) for e in evidence
+    )
+
+
+_MODEL_FLAGS = ("quote_not_found", "no_without_negation", "no_unrelated_quote")
+
+
 def _row(
     req: Requirement,
     a: _Answer | None,
@@ -170,6 +211,9 @@ def _row(
     ):
         row.status = Status.UNKNOWN
         row.flags.append("no_without_negation")
+    if row.status == Status.NO and row.evidence and not _about(req, row.evidence):
+        row.status = Status.UNKNOWN
+        row.flags.append("no_unrelated_quote")
     positive = row.status in (Status.FULL, Status.PARTIAL)
     if positive and req.kind in (ReqKind.SKILL, ReqKind.TOOL) and not _relevant(req, row.evidence):
         row.status = Status.PARTIAL
@@ -181,7 +225,7 @@ def _row(
     by_dates = bool(req.kind == ReqKind.EXPERIENCE and req.years)
     by_dates = by_dates and _experience(req, a, row, doc, facts, today, skills)
     if by_dates:  # стаж посчитал код, цитата и статус модели не нужны
-        row.flags = [f for f in row.flags if f not in ("quote_not_found", "no_without_negation")]
+        row.flags = [f for f in row.flags if f not in _MODEL_FLAGS]
     if not row.evidence:
         row.status = Status.UNKNOWN  # правило 1–2: ни «нет», ни «да» без проверенной цитаты
     only_letter = req.kind in (ReqKind.SKILL, ReqKind.QUALITY) and all(
