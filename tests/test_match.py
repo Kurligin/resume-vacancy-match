@@ -11,6 +11,7 @@ from rvm.facts import Period, ResumeFacts
 from rvm.ingest import load_path
 from rvm.llm import LLMClient
 from rvm.models import Document, Evidence, Line, MatchRow, ReqKind, Requirement, Section, Status
+from rvm.pipeline import match as match_mod
 from rvm.pipeline.match import match
 from rvm.pipeline.verify import check, quote_ok, verified_share
 from rvm.refs.skills import mentioned
@@ -390,3 +391,46 @@ def test_only_study_projects_is_negation(tmp_path: Path) -> None:
     reqs = [req("R1", "Коммерческий опыт на Vue", ReqKind.EXPERIENCE)]
     rows, _ = run(reqs, [[ans("R1", "no", [(1, quote)])]], tmp_path, doc, ResumeFacts())
     assert rows["R1"].status == Status.NO
+
+
+# --- Q2: «нет» только по цитате, относящейся к требованию ---
+
+NO_DOC = Document(
+    name="r",
+    lines=[
+        Line(n=1, text="Vue знаю, но коммерческих проектов на нём у меня нет."),
+        Line(n=2, text="Не готов к переезду."),
+        Line(n=3, text="Формат: удалённо, гибрид, на месте работодателя."),
+    ],
+)
+
+
+def test_no_with_unrelated_negation_is_unknown(tmp_path: Path) -> None:
+    quote = "коммерческих проектов на нём у меня нет"
+    reqs = [
+        req("R1", "Опыт учёта ОС", ReqKind.EXPERIENCE),
+        req("R2", "Коммерческий опыт Vue", ReqKind.EXPERIENCE),
+        req("R3", "Очный формат в Долгопрудном", ReqKind.CONDITION),
+    ]
+    reply = [
+        ans("R1", "no", [(1, quote)]),
+        ans("R2", "no", [(1, quote)]),
+        ans("R3", "no", [(2, "Не готов к переезду")]),
+    ]
+    rows, _ = run(reqs, [reply], tmp_path, NO_DOC, ResumeFacts())
+    assert rows["R1"].status == Status.UNKNOWN and "no_unrelated_quote" in rows["R1"].flags
+    assert rows["R2"].status == Status.NO and rows["R2"].flags == []
+    assert rows["R3"].status == Status.UNKNOWN and "no_unrelated_quote" in rows["R3"].flags
+
+
+def test_no_related_by_case_forms(tmp_path: Path) -> None:
+    reqs = [req("R1", "Готовность к переезду", ReqKind.CONDITION)]
+    reply = [ans("R1", "no", [(2, "Не готов к переезду")])]
+    rows, _ = run(reqs, [reply], tmp_path, NO_DOC, ResumeFacts())
+    assert rows["R1"].status == Status.NO
+
+
+def test_match_v3_prompt_rules() -> None:
+    text = match_mod.PROMPT.read_text(encoding="utf-8")
+    assert match_mod.PROMPT_VERSION == "match.v3"
+    assert "не готов к переезду" in text and "подтверждение" in text
