@@ -1169,6 +1169,7 @@ dependencies = [
     { name = "pypdfium2" },
     { name = "pytesseract" },
     { name = "python-docx" },
+    { name = "rapidfuzz" },
     { name = "striprtf" },
 ]
 
@@ -1194,6 +1195,7 @@ requires-dist = [
     { name = "pypdfium2", specifier = ">=5.15.2" },
     { name = "pytesseract", specifier = ">=0.3.13" },
     { name = "python-docx", specifier = ">=1.2" },
+    { name = "rapidfuzz", specifier = ">=3.14.6" },
     { name = "striprtf", specifier = ">=0.0.35" },
 ]
 
