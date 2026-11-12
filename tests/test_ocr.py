@@ -9,7 +9,7 @@ from typing import Any
 import pytesseract
 import pytest
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from rapidfuzz import fuzz
 
 from rvm.ingest import load_bytes, load_path, ocr
@@ -206,3 +206,114 @@ def test_tesseract_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ocr.pytesseract, "image_to_data", slow)
     doc = load_bytes("blank.png", _png(Image.new("L", (400, 400), 255)))
     assert doc.status == FileStatus.TOO_LARGE and 0 < seen["timeout"] <= ocr.OCR_PAGE_SECONDS
+
+
+# --- другие форматы картинок и pdf с плохим текстовым слоем (R1f) ---
+
+
+def _line_image(text: str, mode: str = "L") -> Image.Image:
+    font = _font()
+    img = Image.new(mode, (1400, 160), 255 if mode == "L" else (255, 255, 255, 0))
+    ImageDraw.Draw(img).text((40, 50), text, font=font, fill=0 if mode == "L" else (0, 0, 0, 255))
+    return img
+
+
+@needs_ocr
+@pytest.mark.parametrize(
+    ("fmt", "mode"),
+    [("WEBP", "L"), ("WEBP", "RGBA"), ("TIFF", "L"), ("BMP", "L"), ("GIF", "L"), ("HEIF", "L")],
+)
+def test_other_image_formats(fmt: str, mode: str) -> None:
+    img = _line_image("Опыт работы Python PostgreSQL", mode)
+    if fmt == "HEIF":
+        img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, **({"lossless": True} if fmt == "WEBP" else {}))
+    doc = load_bytes("photo", buf.getvalue())
+    assert doc.status == FileStatus.OK, doc.warnings
+    assert "postgresql" in _flat(doc) and all(ln.ocr for ln in doc.lines)
+
+
+def test_text_starting_with_bm_is_text() -> None:
+    doc = load_bytes("r.txt", "BMW, инженер\nPython".encode())
+    assert doc.status == FileStatus.OK and doc.lines[0].text == "BMW, инженер"
+
+
+def _text_pdf(content: bytes) -> bytes:
+    """Одна страница A4 с текстом Helvetica (WinAnsi): content — поток операторов страницы."""
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content),
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for i, obj in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (i, obj)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objs) + 1,
+        xref,
+    )
+
+
+def _image_pdf(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="PDF", resolution=300)
+    return buf.getvalue()
+
+
+def _join_pdf(*pdfs: bytes, overlay: bool = False) -> bytes:
+    """Страницы подряд; overlay — вторую накладываем поверх первой (скан с текстовым слоем)."""
+    pages = [PdfReader(io.BytesIO(p)).pages[0] for p in pdfs]
+    w = PdfWriter()
+    if overlay:
+        base = w.add_page(pages[0])
+        base.merge_page(pages[1])
+    else:
+        for p in pages:
+            w.add_page(p)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+_SCAN_TEXT = ["Опыт работы — 3 года", "Разработка сервисов на Python и PostgreSQL"]
+
+
+@needs_ocr
+def test_pdf_with_garbled_text_layer_goes_to_ocr() -> None:
+    garbled = "Опыт работы Python разработчик".encode("cp1251")  # битый ToUnicode: «Îïûò ðàáîòû»
+    layer = _text_pdf(b"BT /F1 12 Tf 3 Tr 72 720 Td (" + garbled + b") Tj ET")
+    assert "Îïûò" in (PdfReader(io.BytesIO(layer)).pages[0].extract_text() or "")
+    pdf = _join_pdf(_image_pdf(_pages(_SCAN_TEXT)[0]), layer, overlay=True)
+    doc = load_bytes("scan.pdf", pdf)
+    assert doc.status == FileStatus.OK
+    assert "postgresql" in _flat(doc) and "îïûò" not in _flat(doc)
+    assert all(ln.ocr for ln in doc.lines)
+
+
+@needs_ocr
+def test_mixed_pdf_text_and_scan_pages() -> None:
+    text_page = _text_pdf(b"BT /F1 12 Tf 72 720 Td (Senior developer at Acme since 2020) Tj ET")
+    pdf = _join_pdf(text_page, _image_pdf(_pages(_SCAN_TEXT)[0]))
+    doc = load_bytes("mixed.pdf", pdf)
+    assert doc.status == FileStatus.OK
+    assert doc.lines[0].text == "Senior developer at Acme since 2020" and not doc.lines[0].ocr
+    assert "postgresql" in _flat(doc) and all(ln.ocr for ln in doc.lines[1:])
+
+
+def test_mixed_pdf_without_tesseract_keeps_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ocr, "ocr_ready", lambda: "распознавание сканов недоступно")
+    text_page = _text_pdf(b"BT /F1 12 Tf 72 720 Td (Senior developer at Acme since 2020) Tj ET")
+    doc = load_bytes("mixed.pdf", _join_pdf(text_page, _blank_pdf(1)))
+    assert [ln.text for ln in doc.lines] == ["Senior developer at Acme since 2020"]
+    assert "распознавание сканов недоступно" in doc.warnings

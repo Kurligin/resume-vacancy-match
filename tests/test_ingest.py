@@ -14,7 +14,7 @@ from docx.oxml.ns import nsdecls
 from pypdf import PdfWriter
 
 from rvm.ingest import load_bytes, load_path, load_text
-from rvm.ingest.normalize import normalize_line
+from rvm.ingest.normalize import header_block, normalize_line
 from rvm.ingest.readers import HIDDEN_TEXT
 from rvm.models import FileStatus
 
@@ -162,6 +162,11 @@ def test_case_files() -> None:
     r3 = next(d for n, d in docs.items() if "резюме 3" in n)
     assert any("(2 года)" in ln.text for ln in r3.lines)
     assert any(ln.block == "Опыт работы" for ln in r3.lines)
+    blocks = {ln.text: ln.block for ln in r3.lines}
+    assert blocks["Дополнительно"] == "Дополнительная информация"
+    assert (
+        blocks["Не готов к переезду, готов к командировкам"] is None
+    )  # «Гражданство: …» — не заголовок
 
 
 # --- лимиты и безопасность ---
@@ -256,3 +261,132 @@ def test_docx_visible_text_no_warning(rpr: str) -> None:
     d = load_bytes("a.docx", _hidden_docx(rpr))
     assert any("Vue 3, Tailwind" in ln.text for ln in d.lines)
     assert HIDDEN_TEXT not in d.warnings
+
+
+# --- форматы и заголовки блоков (R1f) ---
+
+
+def test_html_without_tags_and_scripts() -> None:
+    html = (
+        "<!DOCTYPE html><html><head><title>Резюме</title><style>p{color:red}</style>"
+        "<script>var x = 'Python';</script></head><body><h2>Опыт работы</h2>"
+        "<p>ООО <b>Ромашка</b>, разработчик</p><ul><li>Vue 3</li><li>Tailwind CSS</li></ul>"
+        "<p>строка<br>с переносом &amp; сущностью</p></body></html>"
+    )
+    d = load_bytes("r.html", html.encode("utf-8"))
+    assert d.status == FileStatus.OK
+    assert [ln.text for ln in d.lines] == [
+        "Опыт работы",
+        "ООО Ромашка, разработчик",
+        "Vue 3",
+        "Tailwind CSS",
+        "строка",
+        "с переносом & сущностью",
+    ]
+    assert d.lines[1].block == "Опыт работы"
+
+
+def _odt(content: str, mimetype: str = "application/vnd.oasis.opendocument.text") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", mimetype)
+        z.writestr("content.xml", content)
+    return buf.getvalue()
+
+
+_ODT_NS = (
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"'
+)
+
+
+def test_odt() -> None:
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?><office:document-content {_ODT_NS}>'
+        "<office:body><office:text><text:h>Опыт работы</text:h>"
+        "<text:p>ООО<text:s/>Ромашка,<text:tab/>Python<text:line-break/>Go</text:p>"
+        "<table:table><table:table-row><table:table-cell><text:p>2020 — 2023</text:p>"
+        "</table:table-cell></table:table-row></table:table>"
+        "</office:text></office:body></office:document-content>"
+    )
+    d = load_bytes("r.odt", _odt(content))
+    assert d.status == FileStatus.OK
+    assert [(ln.text, ln.block) for ln in d.lines] == [
+        ("Опыт работы", "Опыт работы"),
+        ("ООО Ромашка, Python", "Опыт работы"),
+        ("Go", "Опыт работы"),
+        ("2020 — 2023", "Опыт работы"),
+    ]
+
+
+def test_odt_spreadsheet_unsupported() -> None:
+    d = load_bytes("t.ods", _odt("<x/>", "application/vnd.oasis.opendocument.spreadsheet"))
+    assert d.status == FileStatus.UNSUPPORTED
+
+
+def test_odt_zip_bomb() -> None:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        z.writestr("content.xml", b" " * (60 * 2**20))
+    assert load_bytes("b.odt", buf.getvalue()).status == FileStatus.BROKEN
+
+
+@pytest.mark.parametrize("enc", ["utf-16", "utf-16-be"])
+def test_txt_utf16_bom(enc: str) -> None:
+    data = "Навыки\nPython, SQL".encode(enc)
+    if enc == "utf-16-be":
+        data = b"\xfe\xff" + data
+    d = load_bytes("r.txt", data)
+    assert [(ln.text, ln.block) for ln in d.lines] == [
+        ("Навыки", "Навыки"),
+        ("Python, SQL", "Навыки"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "block"),
+    [
+        ("О себе", "Обо мне"),
+        ("ОБО МНЕ:", "Обо мне"),
+        ("About me", "Обо мне"),
+        ("Summary", "Обо мне"),
+        ("Личные качества", "Обо мне"),
+        ("Skills", "Навыки"),
+        ("Профессиональные навыки", "Навыки"),
+        ("Опыт", "Опыт работы"),
+        ("Experience", "Опыт работы"),
+        ("Work experience — 5 years", "Опыт работы"),
+        ("Education", "Образование"),
+        ("Дополнительно", "Дополнительная информация"),
+        ("Дополнительная информация:", "Дополнительная информация"),
+        ("Гражданство, время в пути до работы", "Гражданство"),
+        ("Желаемая должность и зарплата", "Желаемая должность"),
+        ("Опыт работы — 7 лет 9 месяцев", "Опыт работы"),
+    ],
+)
+def test_header_aliases(line: str, block: str) -> None:
+    assert header_block(line) == block
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Гражданство: Россия",
+        "Гражданство: Россия, есть разрешение на работу: Россия",
+        "Навыки: Python, SQL",
+        "Образование: высшее экономическое.",
+        "Опыт работы с Git",
+        "Опыт работы - в команде",
+        "Дополнительно (плюс): понимание различий SPA и SSR",
+        "Skills: Python",
+    ],
+)
+def test_not_headers(line: str) -> None:
+    assert header_block(line) is None
+
+
+def test_inline_label_keeps_block() -> None:
+    d = load_text("r", "О себе\nОтветственный\nГражданство: Россия\nSkills\nPython")
+    assert [ln.block for ln in d.lines] == ["Обо мне", "Обо мне", "Обо мне", "Навыки", "Навыки"]
