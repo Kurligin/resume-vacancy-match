@@ -30,7 +30,16 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .mark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#fff;
   background:linear-gradient(145deg,#3a8dff,#0058d0);box-shadow:0 1px 2px rgba(0,60,160,.3),inset 0 1px 0 rgba(255,255,255,.25)}
 .mark .i{width:17px;height:17px;stroke-width:2.2}
-.seg{display:flex;background:rgba(0,0,0,.06);border-radius:9px;padding:2px;margin:0 auto}
+.nav{display:flex;gap:4px;margin-left:18px}
+.nav button{position:relative;display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:9px;font-size:14px;font-weight:500;color:var(--fg2);transition:background .2s,color .2s}
+.nav button:hover{color:var(--fg);background:rgba(0,0,0,.04)}
+.nav button[aria-current=page]{color:var(--fg);background:rgba(0,0,0,.07)}
+.badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--part);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center}
+.badge:empty{display:none}
+.spacer{flex:1}
+.back{display:inline-flex;align-items:center;gap:4px;font-size:14px;color:var(--accent);padding:4px 6px;margin:-4px -6px 6px;border-radius:7px}
+.back:hover{background:var(--accent-soft)}
+.seg{display:flex;background:rgba(0,0,0,.06);border-radius:9px;padding:2px}
 .seg button{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--fg2);transition:background .2s,color .2s}
 .seg button[aria-pressed=true]{background:#fff;color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:980px;font-size:13px;font-weight:500;transition:transform .1s ease-out,background .2s}
@@ -44,6 +53,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 
 .wrap{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;max-width:1360px;margin:0 auto;padding:24px}
 .left>*+*,#top>*+*{margin-top:16px}
+[hidden]{display:none!important}
 
 /* Шапка */
 .head{display:flex;align-items:center;gap:14px}
@@ -178,6 +188,102 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .actions{display:flex;align-items:center;gap:8px;margin-top:12px}
 .stub{display:flex;gap:10px;align-items:center;color:var(--fg2);font-size:14px;padding:16px 0}
 
+/* База */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{padding:14px 16px}
+.stat .k{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--fg2)}
+.stat .v{font-size:28px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.stat.warn .v{color:var(--part)}
+.queue{padding:14px 18px}
+.qh{display:flex;align-items:center;gap:10px;font-size:14px}
+.qh b{font-weight:600}
+.qh .btn{margin-left:auto}
+.bar2{height:6px;border-radius:3px;background:#ececf0;overflow:hidden;margin:10px 0 8px;display:flex}
+.bar2 i{height:100%}
+.qfiles{display:flex;flex-wrap:wrap;gap:6px}
+.qf{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 8px;border-radius:7px;background:#f5f5f7;color:var(--fg2)}
+.qf.ok{background:var(--full-bg);color:var(--full)} .qf.err{background:var(--no-bg);color:var(--no)} .qf.run{background:var(--accent-soft);color:var(--accent)}
+.tools{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.search{display:flex;align-items:center;gap:8px;flex:0 1 240px;min-width:170px;white-space:nowrap;overflow:hidden;height:34px;padding:0 12px;border-radius:10px;background:#f2f2f5;color:var(--fg3);font-size:14px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:30px;padding:0 12px;border-radius:980px;font-size:13px;font-weight:500;color:var(--fg2);background:#f2f2f5;display:inline-flex;align-items:center;gap:6px;transition:background .15s}
+.chip .num{font-size:11px;color:var(--fg3)}
+.chip[aria-pressed=true]{background:var(--fg);color:#fff}
+.chip[aria-pressed=true] .num{color:rgba(255,255,255,.6)}
+.crow{display:grid;grid-template-columns:40px minmax(0,1fr) 210px 120px 104px;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 16px;border-top:1px solid var(--line);transition:background .15s}
+.crow:first-child{border-top:0}
+.crow:hover{background:rgba(0,0,0,.02)}
+.crow[aria-selected=true]{background:#f7f9fd;box-shadow:inset 3px 0 0 var(--accent)}
+.crow .best{font-size:13px;color:var(--fg2);display:flex;align-items:center;gap:6px;min-width:0}
+.crow .best b{color:var(--fg);font-weight:600;font-size:15px}
+.crow .best span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{justify-self:start;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:980px;white-space:nowrap}
+.p-new{background:var(--accent-soft);color:var(--accent)} .p-rev{background:#f2f2f5;color:var(--fg2)} .p-inv{background:var(--full-bg);color:var(--full)}
+.p-res{background:#f1ecfb;color:#6b3fc4} .p-rej{background:var(--unk-bg);color:var(--unk)}
+.reply{justify-self:end}
+.wait{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--part)}
+/* Карточка кандидата справа */
+.ccard{padding:16px 18px}
+.ccard .ch1{display:flex;align-items:center;gap:12px}
+.ccard .ch1 .avatar{width:44px;height:44px}
+.ccard .ch1 .avatar .i{width:22px;height:22px}
+.doc .ccard h2{display:block;font-size:19px;letter-spacing:-.01em;color:var(--fg);padding:0;font-weight:700}
+.ccard .sec{font-size:12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+.ev{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:6px 0;font-size:14px}
+.ev .n{font-weight:600}
+.tl{position:relative;padding-left:18px}
+.tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:#ececf0;border-radius:1px}
+.tli{position:relative;padding:5px 0;font-size:13px}
+.tli::before{content:"";position:absolute;left:-17px;top:11px;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #c7c7cc}
+.tli.acc::before{border-color:var(--accent)}
+.tli time{color:var(--fg3);font-size:12px;margin-right:6px}
+.cactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btn-danger{color:var(--no);background:var(--no-bg)}
+/* Лист быстрого ответа */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.18);z-index:20;display:grid;place-items:center;animation:fade .2s}
+@keyframes fade{from{opacity:0}}
+.sheet{width:min(620px,calc(100vw - 32px));background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:20px 22px;animation:rise .32s var(--spring)}
+@keyframes rise{from{opacity:0;transform:translateY(12px) scale(.98)}}
+.sheet h3{display:flex;align-items:center;gap:8px;font-size:18px}
+.sheet .seg{margin:14px 0 4px;width:max-content}
+.fld{display:grid;grid-template-columns:56px 1fr;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}
+.fld span{color:var(--fg3)}
+.fld input{font:inherit;border:0;outline:0;padding:6px 0;background:none;color:var(--fg)}
+.ed{width:100%;min-height:190px;margin-top:10px;font:inherit;font-size:14px;line-height:1.5;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafafc;resize:vertical;outline:0;transition:border-color .15s,box-shadow .15s}
+.ed:focus,.fld:focus-within{border-color:var(--accent)}
+.ed:focus{box-shadow:0 0 0 3px rgba(0,113,227,.15);background:#fff}
+.hint{font-size:12px;color:var(--fg3);margin-top:6px}
+.alert{width:min(360px,calc(100vw - 32px));background:rgba(255,255,255,.96);backdrop-filter:blur(20px);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.22);padding:22px 20px 16px;text-align:center;animation:rise .28s var(--spring)}
+.alert .ai{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;margin:0 auto 10px}
+.alert .ai .i{width:22px;height:22px}
+.alert h3{font-size:17px;letter-spacing:-.01em}
+.alert p{font-size:13px;color:var(--fg2);margin:6px 0 16px}
+.alert .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.alert .btn{justify-content:center;height:36px}
+.btn-red{background:var(--no);color:#fff}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:12px;background:rgba(29,29,31,.92);color:#fff;border-radius:14px;padding:10px 12px 10px 16px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.25);animation:rise .3s var(--spring)}
+.toast button{color:#64b5ff;font-weight:600;padding:4px 8px;border-radius:7px}
+.sheet .actions{justify-content:flex-end}
+
+/* Окно загрузки */
+.drop{margin-top:14px;border:1.5px dashed #c7c7cc;border-radius:16px;padding:26px 16px;text-align:center;background:#fafafc;transition:border-color .2s,background .2s}
+.drop:hover{border-color:var(--accent);background:#f5f9ff}
+.drop .di{width:48px;height:48px;border-radius:14px;margin:0 auto 10px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.drop .di .i{width:24px;height:24px}
+.drop b{display:block;font-size:15px}
+.drop small{display:block;color:var(--fg3);font-size:12px;margin-top:4px}
+.sel{font:inherit;border:0;outline:0;background:none;color:var(--fg);padding:6px 0}
+.or{display:flex;align-items:center;gap:10px;color:var(--fg3);font-size:12px;margin:14px 0 4px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.mipt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;border-radius:14px;background:linear-gradient(120deg,#eaf2fd,#eeeefc);border:1px solid rgba(0,113,227,.12)}
+.mipt .di{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--accent);color:#fff;flex:none}
+.mipt small{display:block;color:var(--fg2);font-size:12px}
+.vlist{max-height:180px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:12px}
+.vli{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);font-size:14px}
+.vli:first-child{border-top:0}
+.vli input{accent-color:var(--accent);width:16px;height:16px}
+.vli small{margin-left:auto;color:var(--fg3);font-size:12px}
+
 /* Текст резюме */
 .doc{position:sticky;top:80px;max-height:calc(100vh - 104px);overflow:auto;padding:14px 0;align-self:start}
 .doc h2{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);padding:0 18px 8px}
@@ -225,18 +331,27 @@ mark{background:none;color:inherit}
  <symbol id="i-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.9.7-1.9 1-3 1s-2.1-.3-3-1Z"/><path d="m2 16 3-8 3 8c-.9.7-1.9 1-3 1s-2.1-.3-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
  <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/></symbol>
+ <symbol id="i-chev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+ <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+ <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+ <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+ <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.5 21.7a.5.5 0 0 0 .9 0l6.5-19a.5.5 0 0 0-.6-.6l-19 6.5a.5.5 0 0 0 0 .9l7.9 3.2a2 2 0 0 1 1.1 1.1z"/><path d="m21.9 2.1-10.9 10.9"/></symbol>
+ <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+ <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+ <symbol id="i-hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+ <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1"/></symbol>
 </svg>
 
 <header class="bar">
   <span class="logo"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>Сверка</span>
+  <nav class="nav" aria-label="Разделы">
+    <button data-nav="base" aria-current="page"><svg class="i"><use href="#i-users"/></svg>Кандидаты<span class="badge num" id="navbadge"></span></button>
+    <button data-nav="vac"><svg class="i"><use href="#i-brief"/></svg>Вакансии</button>
+  </nav>
+  <span class="spacer"></span>
   <span class="mock-tag">макет · цифры условные</span>
-  <div class="seg" role="group" aria-label="Направление">
-    <button aria-pressed="true" data-view="cand"><svg class="i i-sm"><use href="#i-user"/></svg>Кандидат → вакансии</button>
-    <button aria-pressed="false" data-view="vac"><svg class="i i-sm"><use href="#i-users"/></svg>Вакансия → кандидаты</button>
-  </div>
-  <button class="btn btn-ghost"><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
-  <button class="btn btn-primary"><svg class="i i-sm"><use href="#i-download"/></svg>Экспорт</button>
+  <button class="btn btn-primary" data-upload><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
 </header>
 
 <main class="wrap">
@@ -447,7 +562,29 @@ const TAGS={ // короткие метки в рейтинге
  'c2:v1':[['ex','up','сверх: Nuxt, автотесты']],'c3:v1':[['cl','alert','стаж: «2 года» ≠ датам']],
  'c4:v2':[['cl','alert','учёт ОС не назван']],'c1:v3':[['ex','up','сверх: автоматизация']]};
 
-let st={view:'cand',cand:'c1',vac:'v3',tab:'req',pii:false,pair:false};
+const BASE=[ // [ключ, статус, дата, лучшая вакансия, балл, ждёт ответа (дней), источник]
+ ['c1','new','12.11','v3',72,1,'отклик на Frontend'],
+ ['c2','rev','11.11','v1',86,2,'отклик на Frontend'],
+ ['c3','inv','11.11','v1',84,0,'отклик на Frontend'],
+ ['c4','new','12.11','v2',63,1,'отклик на учёт ОС'],
+ ['x5','res','14.10','v3',61,0,'резерв с октября'],
+ ['x6','res','02.10','v1',58,0,'резерв с октября'],
+ ['x7','rej','28.09','v2',22,0,'отказ отправлен'],
+];
+const XC={x5:{n:5,real:'Орлова Мария',title:'Методист онлайн-курсов'},x6:{n:6,real:'Ким Сергей',title:'Junior Frontend (React)'},x7:{n:7,real:'Белов Олег',title:'Кладовщик'}};
+const PS={new:['новый','p-new'],rev:['на рассмотрении','p-rev'],inv:['приглашён','p-inv'],res:['в резерве','p-res'],rej:['отказ','p-rej']};
+const HIST={
+ c1:[['12.11 10:42','Загружено резюме 1.docx · отклик на Frontend-разработчик',1],['12.11 10:43','Оценён по 3 вакансиям · лучше подходит «Куратор»',1],['12.11 10:43','Предложено: предложить другую вакансию',0]],
+ c2:[['11.11 18:05','Загружено резюме 2.docx',1],['11.11 18:06','Оценён: Frontend 86 · подходит',1],['11.11 18:20','Статус: на рассмотрении',0]],
+ c3:[['11.11 18:05','Загружено резюме 3.docx',1],['11.11 18:06','Оценён: Frontend 84 · подходит',1],['11.11 19:02','Ответ отправлен: приглашение + тестовое',1],['11.11 19:02','Статус: приглашён',0]],
+ c4:[['12.11 09:15','Загружено резюме 4.docx · отклик на учёт ОС',1],['12.11 09:16','Оценена: учёт ОС 63 · частично',1]],
+ x5:[['14.10 12:00','Загружено резюме · отклик на «Методист»',1],['20.10 16:30','Статус: в резерве',0],['12.11 09:00','Новая вакансия «Куратор» → совпадение 61',1]],
+ x6:[['02.10 11:10','Загружено резюме',1],['05.10 14:00','Статус: в резерве',0]],
+ x7:[['28.09 10:00','Загружено резюме',1],['29.09 12:00','Ответ отправлен: отказ с причинами',1]],
+};
+const cname=k=>C[k]?label(k):(st.pii?XC[k].real:'Кандидат '+XC[k].n);
+const ctitle=k=>C[k]?C[k].title:XC[k].title;
+let st={view:'base',cand:'c1',vac:'v3',tab:'req',pii:false,pair:false,flt:'all',bc:'c1',reply:null,rt:0,confirm:null,undo:null,upload:null};
 const $=s=>document.querySelector(s);
 const key=(c,v)=>c+':'+v;
 const label=c=>st.pii?C[c].real:'Кандидат '+C[c].n;
@@ -462,9 +599,9 @@ const piiTog=()=>`<label class="switch">ФИО и пол <button class="tog" rol
 /* ---------- Верх: вид «кандидат» ---------- */
 function topCand(){
   const c=st.cand, x=C[c], ks=order(VK.map(v=>key(c,v))), best=ks[0].split(':')[1];
-  let h=`<div class="head"><span class="avatar">${ic('user')}</span><div class="who"><h1>${label(c)}</h1>
+  let h=`<button class="back" data-nav="base">${ic('chev','i-sm')}Кандидаты</button><div class="head"><span class="avatar">${ic('user')}</span><div class="who"><h1>${label(c)}</h1>
     <div class="sub"><span>${ic('brief','i-sm')}${x.title}</span><span>${ic('inbox','i-sm')}отклик на «${VAC[x.applied].t}»</span><span>${ic('file','i-sm')}${x.file}</span></div></div>
-    <div class="side"><div class="avs">${CK.map(k=>`<button class="av" aria-pressed="${k===c}" data-cand="${k}" title="${label(k)}">${C[k].n}</button>`).join('')}</div>${piiTog()}</div></div>`;
+    <div class="side"><span style="display:flex;gap:8px"><button class="btn btn-ghost" data-reply="${c}">${ic('send','i-sm')}Ответить</button><button class="btn btn-ghost">${ic('download','i-sm')}Экспорт</button></span>${piiTog()}</div></div>`;
   if(best!==x.applied){const a=S[key(c,best)][0],b=S[key(c,x.applied)][0];
     h+=`<div class="callout"><span class="ico">${ic('arrow')}</span><div><b>Лучше подходит «${VAC[best].t}»: ${a} против ${b}</b> у вакансии отклика. Решают коммуникации с 50+ заказчиками и работа с таблицами. По фронтенду нет коммерческого Vue и Tailwind.</div><button class="btn btn-white" data-vac="${best}">Открыть</button></div>`;}
   h+=`<div class="card rank" role="listbox" aria-label="Рейтинг вакансий">`+ks.map((k,i)=>{const v=k.split(':')[1],vv=verdict(S[k][0]);
@@ -479,8 +616,8 @@ function topVac(){
   const [a,b]=ks, close=S[a][3]===0&&S[b][3]===0&&S[a][0]-S[b][0]<5;
   let h=`<div class="head"><span class="avatar blue">${ic('brief')}</span><div class="who"><h1>${VAC[v].t}</h1>
     <div class="sub">${VAC[v].meta.map(([x,y])=>`<span>${ic(x,'i-sm')}${y}</span>`).join('')}<span>${ic('users','i-sm')}${CK.length} резюме · ${ok} подходят хотя бы частично</span></div></div>
-    <div class="side">${piiTog()}</div></div>`;
-  h+=`<div class="card heat"><div class="heat-h"><b>${ic('grid','c-acc')}Обзор: все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
+    <div class="side"><span style="display:flex;gap:8px"><button class="btn btn-ghost" data-upload="vac">${ic('plus','i-sm')}Добавить вакансию</button><button class="btn btn-ghost">${ic('download','i-sm')}Экспорт</button></span>${piiTog()}</div></div>`;
+  h+=`<div class="card heat"><div class="heat-h"><b>${ic('grid','c-acc')}Все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
    <div class="hg"><span></span>${CK.map(c=>`<span class="ch">${st.pii?C[c].real.split(' ')[0]:'К'+C[c].n}</span>`).join('')}
    ${VK.map(vk=>`<button class="hname ${vk===v?'on':''}" data-vac="${vk}">${ic('brief','i-sm')}${VAC[vk].t}</button>${CK.map(c=>{const s=S[key(c,vk)][0];const cls=s>=70?'s-full':s>=45?'s-partial':'s-unknown';
      return `<button class="hcell num ${cls} ${vk===v&&c===st.cand?'on':''}" data-vac="${vk}" data-cand="${c}" title="${label(c)} · ${VAC[vk].t}">${s}</button>`}).join('')}`).join('')}</div></div>`;
@@ -549,14 +686,128 @@ function highlight(ev){
   ev.forEach(([n,q],j)=>{const el=$('#L'+n); if(!el) return; const s=el.lastChild; s.dataset.orig=s.dataset.orig||s.innerHTML;
     if(q) s.innerHTML=s.dataset.orig.replace(q,`<mark>${q}</mark>`); el.classList.add('hl'); if(j===0) el.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});});
 }
-function render(){ $('#top').innerHTML=st.view==='cand'?topCand():topVac(); renderSummary(); renderPane(); renderDoc(); }
+function topBase(){
+  const n=f=>BASE.filter(r=>f==='all'||r[1]===f).length, wait=BASE.filter(r=>r[5]>0).length;
+  let h=`<div class="head"><span class="avatar blue">${ic('db')}</span><div class="who"><h1>Кандидаты</h1>
+    <div class="sub"><span>${ic('users','i-sm')}${BASE.length} в базе</span><span>${ic('brief','i-sm')}3 открытые вакансии</span></div></div>
+    <div class="side">${piiTog()}</div></div>
+   <div class="stats">
+    <div class="card stat warn"><div class="k">${ic('bell','i-sm')}Ждут ответа</div><div class="v num">${wait}</div></div>
+    <div class="card stat"><div class="k">${ic('clock','i-sm')}Среднее время ответа</div><div class="v num">5 ч</div></div>
+    <div class="card stat"><div class="k">${ic('archive','i-sm')}В резерве</div><div class="v num">${n('res')}</div></div>
+    <div class="card stat"><div class="k">${ic('inbox','i-sm')}Новых за неделю</div><div class="v num">4</div></div></div>
+   <div class="card queue"><div class="qh">${ic('upload','c-acc')}<span><b>отклики_frontend.zip</b> · 10 файлов · 8 оценено, 1 в работе, 1 с ошибкой</span></div>
+    <div class="bar2"><i style="width:80%;background:var(--full)"></i><i style="width:10%;background:var(--accent)"></i><i style="width:10%;background:var(--no)"></i></div>
+    <div class="qfiles"><span class="qf ok">${ic('check','i-sm')}8 готово</span><span class="qf run">${ic('clock','i-sm')}резюме_Ким.pdf · распознаём скан</span><span class="qf err">${ic('alert','i-sm')}фото_резюме.jpg · скан плохого качества, проверьте вручную</span></div></div>
+   <div class="callout"><span class="ico">${ic('archive')}</span><div><b>Новая вакансия «Куратор образовательного процесса»: в резерве нашёлся 1 подходящий.</b> Кандидат 5 (резерв с октября) — 61, частично.</div><button class="btn btn-white" data-bc="x5">Показать</button></div>
+   <div class="card rank"><div class="tools"><span class="search">${ic('search','i-sm')}Поиск по навыкам, должности…</span><div class="chips">
+    ${[['all','Все'],['new','Новые'],['rev','На рассмотрении'],['inv','Приглашены'],['res','Резерв'],['rej','Отказ']].map(([k,t])=>`<button class="chip" aria-pressed="${st.flt===k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join('')}</div></div>
+   ${BASE.filter(r=>st.flt==='all'||r[1]===st.flt).map(([k,s,d,v,sc,w,src])=>{const vv=verdict(sc);return `<button class="crow" aria-selected="${k===st.bc}" data-bc="${k}">
+     <span class="tile round ${vv[2]}">${ic('user')}</span>
+     <span><div class="t" style="font-weight:600">${cname(k)}</div><div class="meta"><span>${ic('brief','i-sm')}${ctitle(k)}</span><span>${ic('cal','i-sm')}${d}</span><span>${src}</span></div></span>
+     <span class="best"><b class="num">${sc}</b><span>${VAC[v].t}</span></span>
+     <span><span class="pill ${PS[s][1]}">${PS[s][0]}</span>${w?`<div class="wait">${ic('bell','i-sm')}ждёт ${w} дн.</div>`:''}</span>
+     <span class="reply btn btn-ghost" data-reply="${k}">${ic('send','i-sm')}Ответить</span></button>`}).join('')}</div>`;
+  return h;
+}
+function renderCard(){
+  if(!BASE.find(r=>r[0]===st.bc)) st.bc=BASE[0][0];
+  const k=st.bc, row=BASE.find(r=>r[0]===k), ev=VK.map(v=>[v,C[k]?S[key(k,v)][0]:(v===row[3]?row[4]:null)]).filter(x=>x[1]!==null).sort((a,b)=>b[1]-a[1]);
+  $('#doc').innerHTML=`<div class="ccard"><div class="ch1"><span class="avatar">${ic('user')}</span><div><h2>${cname(k)}</h2><div class="sub" style="margin-top:2px"><span>${ctitle(k)}</span></div></div></div>
+   <div class="sec">Статус</div><span class="pill ${PS[row[1]][1]}">${PS[row[1]][0]}</span>
+   <div class="sec">Оценки по вакансиям</div>${ev.map(([v,s])=>{const vv=verdict(s);return `<div class="ev">${ic(vv[3],vv[0]==='подходит'?'c-full':vv[0]==='частично'?'c-part':'')}<span>${VAC[v].t}</span><span class="n num">${s}</span></div>`}).join('')}
+   <div class="sec">История</div><div class="tl">${(HIST[k]||[]).map(([t,x,a])=>`<div class="tli ${a?'acc':''}"><time class="num">${t}</time>${x}</div>`).join('')}</div>
+   <div class="cactions">${C[k]?`<button class="btn btn-ghost" data-open="${k}">${ic('list','i-sm')}Открыть разбор</button>`:''}<button class="btn btn-primary" data-reply="${k}">${ic('send','i-sm')}Ответить</button>
+    ${row[1]!=='res'?`<button class="btn btn-ghost" data-confirm="res">${ic('archive','i-sm')}В резерв</button>`:''}<button class="btn btn-danger" data-confirm="del">${ic('trash','i-sm')}Удалить</button></div></div>`;
+}
+const RT=[['Пригласить','inv'],['Другая вакансия','alt'],['В резерв','res'],['Отказ','rej']];
+function replyText(k,t){const n=cname(k); const v=BASE.find(r=>r[0]===k)[3];
+  return {inv:`Здравствуйте!\n\nСпасибо за отклик. Ваш опыт нам интересен — приглашаем на собеседование по вакансии «${VAC[v].t}».\n\nПредложите, пожалуйста, удобное время на этой неделе.`,
+   alt:`Здравствуйте!\n\nСпасибо за отклик. По вашему опыту вам может лучше подойти другая наша вакансия — «${VAC[v].t}». Если интересно, предлагаем созвониться.`,
+   res:`Здравствуйте!\n\nСпасибо за отклик. Сейчас мы выбрали другого кандидата, но ваш опыт нам интересен: с вашего согласия сохраним резюме и напишем, когда откроется подходящая вакансия.`,
+   rej:`Здравствуйте!\n\nСпасибо за отклик. К сожалению, сейчас мы не готовы сделать предложение: для позиции «${VAC[v].t}» важно требование, которое в резюме не подтверждено: ${{v1:'коммерческий опыт с Vue.js и Tailwind CSS',v2:'опыт учёта основных средств от 3 лет',v3:'опыт работы с образовательными организациями'}[v]}.\n\nБудем рады видеть ваш отклик на другие вакансии МФТИ.`}[t];}
+function renderSheet(){
+  const old=$('#sheet'); if(old) old.remove(); if(!st.reply) return;
+  const t=RT[st.rt][1], v=BASE.find(r=>r[0]===st.reply)[3], d=document.createElement('div'); d.id='sheet'; d.className='scrim';
+  d.innerHTML=`<div class="sheet" role="dialog" aria-label="Быстрый ответ"><h3>${ic('send','c-acc i-lg')}Ответ: ${cname(st.reply)}</h3>
+   <div class="seg">${RT.map(([x],i)=>`<button aria-pressed="${i===st.rt}" data-rt="${i}">${x}</button>`).join('')}</div>
+   <label class="fld"><span>Кому</span><input value="${st.pii?'адрес из резюме':'адрес из резюме · скрыт'}" aria-label="Кому"></label>
+   <label class="fld"><span>Тема</span><input value="МФТИ: ваш отклик на «${VAC[v].t}»" aria-label="Тема"></label>
+   <textarea class="ed" aria-label="Текст письма">${replyText(st.reply,t).replace(/\\n/g,'\n')}</textarea>
+   <div class="hint" style="display:flex;gap:6px;align-items:center">${ic('shield','c-full i-sm')}Текст собран из таблицы требований, его можно править. Смена шаблона заменит текст.</div>
+   <div class="actions"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-ghost">${ic('copy','i-sm')}Скопировать</button><button class="btn btn-ghost">${ic('mail','i-sm')}Открыть письмо</button><button class="btn btn-primary" data-sent>${ic('check','i-sm')}Отмечено: отправлен</button></div></div>`;
+  document.body.appendChild(d);
+}
+const MIPT=[['Инженер-исследователь лаборатории','ФПМИ · 30.10'],['Методист образовательных программ','ЦРИТО · 05.11'],['Специалист по закупкам','УМТО · 07.11'],['Лаборант кафедры','ЛФИ · 08.11'],['Системный администратор','УИТ · 10.11'],['Ведущий бухгалтер','Бухгалтерия · 11.11']];
+function renderUpload(){
+  const old=$('#upload'); if(old) old.remove(); if(!st.upload) return;
+  const res=st.upload==='res', d=document.createElement('div'); d.id='upload'; d.className='scrim';
+  d.innerHTML=`<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic('upload','c-acc i-lg')}Загрузить</h3>
+   <div class="seg"><button aria-pressed="${res}" data-utab="res">${ic('user','i-sm')}Резюме</button><button aria-pressed="${!res}" data-utab="vac">${ic('brief','i-sm')}Вакансии</button></div>
+   ${res?`<div class="drop"><div class="di">${ic('upload')}</div><b>Перетащите резюме или выберите файлы</b><small>одно, пачка или zip · docx, pdf, rtf, txt, doc, сканы jpg и png</small></div>
+     <label class="fld" style="margin-top:8px"><span>Отклик</span><select class="sel" aria-label="Отклик на вакансию"><option>не указано</option>${VK.map(v=>`<option>${VAC[v].t}</option>`).join('')}</select></label>
+     <div class="hint" style="display:flex;gap:6px;align-items:center">${ic('eyeoff','i-sm')}ФИО, контакты, пол и возраст скрываются до анализа. Повторное резюме того же человека попадёт в его карточку.</div>`
+   :`<div class="drop"><div class="di">${ic('file')}</div><b>Перетащите файл вакансии</b><small>docx, pdf, rtf, txt</small></div>
+     <textarea class="ed" style="min-height:90px" placeholder="или вставьте текст вакансии"></textarea>
+     <div class="or">или</div>
+     <button class="mipt"><span class="di">${ic('download')}</span><span><b>Актуальные вакансии МФТИ</b><small>открытые данные «Работы России» · 45 вакансий</small></span></button>
+     <div class="vlist">${MIPT.map(([t,m],i)=>`<label class="vli"><input type="checkbox" ${i<2?'checked':''}>${t}<small>${m}</small></label>`).join('')}</div>
+     <div class="hint" style="display:flex;gap:6px;align-items:center">${ic('archive','i-sm')}Новая вакансия сразу сверяется с кадровым резервом.</div>`}
+   <div class="actions"><button class="btn btn-ghost" data-uclose>Отмена</button><button class="btn btn-primary" data-ugo>${ic(res?'upload':'plus','i-sm')}${res?'Загрузить':'Добавить 2 вакансии'}</button></div></div>`;
+  document.body.appendChild(d);
+}
+function renderConfirm(){
+  const old=$('#confirm'); if(old) old.remove(); if(!st.confirm) return;
+  const {kind,k}=st.confirm, n=cname(k).replace(/^Кандидат /,'Кандидата '), d=document.createElement('div'); d.id='confirm'; d.className='scrim';
+  const res=kind==='res';
+  d.innerHTML=`<div class="alert" role="alertdialog" aria-label="Подтверждение">
+   <div class="ai" style="background:${res?'#f1ecfb':'var(--no-bg)'};color:${res?'#6b3fc4':'var(--no)'}">${ic(res?'archive':'trash')}</div>
+   <h3>${res?`Отправить ${n} в резерв?`:`Удалить ${n}?`}</h3>
+   <p>${res?'Карточка останется в базе. Когда появится подходящая вакансия, система сама предложит кандидата.':'Удалятся резюме, оценки, история и отпечатки контактов. Действие нельзя отменить.'}</p>
+   <div class="row"><button class="btn btn-ghost" data-cancel>Отмена</button><button class="btn ${res?'btn-primary':'btn-red'}" data-ok>${res?'В резерв':'Удалить'}</button></div></div>`;
+  document.body.appendChild(d);
+}
+let toastTimer;
+function toast(text,undo){
+  const old=$('#toast'); if(old) old.remove(); clearTimeout(toastTimer);
+  const d=document.createElement('div'); d.id='toast'; d.className='toast'; d.innerHTML=`<span>${text}</span>${undo?'<button data-undo>Отменить</button>':''}`;
+  document.body.appendChild(d); st.undo=undo||null; toastTimer=setTimeout(()=>{d.remove();st.undo=null;},4500);
+}
+function stamp(){const n=new Date();return `12.11 ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`}
+function render(){
+  const base=st.view==='base';
+  $('#summary').hidden=base; document.querySelector('.detail').hidden=base;
+  $('#top').innerHTML=base?topBase():st.view==='cand'?topCand():topVac();
+  if(base){renderCard();} else {renderSummary(); renderPane(); renderDoc();}
+  renderSheet(); renderConfirm(); renderUpload();
+  document.querySelectorAll('[data-nav]').forEach(b=>{if(b.closest('.nav')) b.toggleAttribute('aria-current',(st.view==='vac')===(b.dataset.nav==='vac')); if(b.getAttribute('aria-current')!==null) b.setAttribute('aria-current','page');});
+  $('#navbadge').textContent=BASE.filter(r=>r[5]>0).length||'';
+}
 const bestCand=v=>order(CK.map(c=>key(c,v)))[0].split(':')[0];
 const bestVac=c=>order(VK.map(v=>key(c,v)))[0].split(':')[1];
 
 document.addEventListener('click',e=>{
   const t=e.target;
-  const sg=t.closest('[data-view]'); if(sg){st.view=sg.dataset.view;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b===sg));
-    if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} else {st.cand='c1';st.vac=bestVac('c1');} st.pair=false; render(); return;}
+  const up=t.closest('[data-upload]'); if(up){st.upload=up.dataset.upload||(st.view==='vac'?'vac':'res');renderUpload();return;}
+  const ut=t.closest('[data-utab]'); if(ut){st.upload=ut.dataset.utab;renderUpload();return;}
+  if(t.closest('[data-uclose]')||t.id==='upload'){st.upload=null;renderUpload();return;}
+  if(t.closest('[data-ugo]')){const r=st.upload==='res'; st.upload=null; renderUpload(); if(r){st.view='base';render();toast('Файлы в очереди — прогресс в «Кандидатах»');} else toast('Добавлено 2 вакансии · сверяем с резервом'); return;}
+  if(t.closest('.sheet')&&!t.closest('button')) return;
+  const nv=t.closest('[data-nav]'); if(nv){st.view=nv.dataset.nav; if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} st.pair=false; render(); window.scrollTo({top:0}); return;}
+  if(t.closest('[data-undo]')&&st.undo){st.undo();$('#toast').remove();render();return;}
+  const cf=t.closest('[data-confirm]'); if(cf){st.confirm={kind:cf.dataset.confirm,k:st.bc};renderConfirm();return;}
+  if(t.closest('[data-cancel]')||t.id==='confirm'){st.confirm=null;renderConfirm();return;}
+  if(t.closest('[data-ok]')){const {kind,k}=st.confirm, n=cname(k); st.confirm=null;
+    if(kind==='res'){const r=BASE.find(x=>x[0]===k), prev=r[1]; r[1]='res'; (HIST[k]=HIST[k]||[]).push([stamp(),'Статус: в резерве',0]); render(); toast(`${n} в резерве`,()=>{r[1]=prev;HIST[k].pop();});}
+    else {const i=BASE.findIndex(x=>x[0]===k); BASE.splice(i,1); render(); toast(`${n} удалён со всеми данными`);}
+    return;}
+  if(t.closest('[data-sent]')){const k=st.reply, r=BASE.find(x=>x[0]===k); r[5]=0; (HIST[k]=HIST[k]||[]).push([stamp(),'Ответ отправлен: '+RT[st.rt][0].toLowerCase(),1]); st.reply=null; render(); toast('Ответ отмечен отправленным'); return;}
+  if(t.closest('[data-close]')||t.id==='sheet'){st.reply=null;renderSheet();return;}
+  const rt=t.closest('[data-rt]'); if(rt){st.rt=+rt.dataset.rt;renderSheet();return;}
+  const rp=t.closest('[data-reply]'); if(rp){st.reply=rp.dataset.reply;st.rt=0;renderSheet();return;}
+  const fl=t.closest('[data-flt]'); if(fl){st.flt=fl.dataset.flt;render();return;}
+  const op=t.closest('[data-open]'); if(op){st.view='cand';st.cand=op.dataset.open;st.vac=bestVac(st.cand);render();window.scrollTo({top:0});return;}
+  const bc=t.closest('[data-bc]'); if(bc){st.bc=bc.dataset.bc;render();return;}
   if(t.closest('#pairbtn')){st.pair=!st.pair;render();return;}
   if(t.closest('#pii')){st.pii=!st.pii;render();return;}
   const el=t.closest('[data-vac],[data-cand]');
