@@ -42,7 +42,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .seg{display:flex;background:rgba(0,0,0,.06);border-radius:9px;padding:2px}
 .seg button{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--fg2);transition:background .2s,color .2s}
 .seg button[aria-pressed=true]{background:#fff;color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:980px;font-size:13px;font-weight:500;transition:transform .1s ease-out,background .2s}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;white-space:nowrap;flex:none;padding:0 14px;border-radius:980px;font-size:13px;font-weight:500;transition:transform .1s ease-out,background .2s}
 .btn:active{transform:scale(.97)}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-primary:hover{background:#0077ed}
@@ -284,6 +284,57 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .vli input{accent-color:var(--accent);width:16px;height:16px}
 .vli small{margin-left:auto;color:var(--fg3);font-size:12px}
 
+/* Разбор потока */
+.buckets{display:flex;gap:8px;flex-wrap:wrap}
+.bk{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);font-weight:500;font-size:14px;color:var(--fg2);transition:box-shadow .2s,color .2s}
+.bk .num{font-weight:700;color:var(--fg)}
+.bk[aria-pressed=true]{color:var(--fg);box-shadow:0 0 0 2px var(--accent)}
+.prog{height:4px;border-radius:2px;background:#e5e5ea;overflow:hidden;margin-top:12px}
+.prog i{display:block;height:100%;background:var(--accent);transition:width .4s var(--spring)}
+.tcard{padding:20px 22px}
+.tc-top{display:flex;align-items:flex-start;gap:14px}
+.tc-top h2{font-size:22px;letter-spacing:-.02em}
+.tc-nav{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--fg3);font-size:13px}
+.tc-nav button{width:30px;height:30px;border-radius:9px;background:#f2f2f5;display:grid;place-items:center}
+.tc-best{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;margin:16px 0 4px;padding:14px 16px;border-radius:14px;background:#f7f9fd}
+.tc-best .big{font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.why-here{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--part);background:var(--part-bg);border-radius:10px;padding:8px 12px;margin-top:10px}
+.why-here.ok{color:var(--full);background:var(--full-bg)}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-top:10px}
+.decide{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px}
+.dbtn{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 14px;border-radius:14px;background:#f2f2f5;text-align:left;transition:transform .1s ease-out,background .2s,box-shadow .2s}
+.dbtn:active{transform:scale(.98)}
+.dbtn:hover{background:#ebebf0}
+.dbtn b{display:flex;align-items:center;gap:7px;font-size:14px}
+.dbtn small{font-size:12px;color:var(--fg3)}
+.dbtn kbd{margin-left:auto;font:600 11px/1 ui-monospace,monospace;color:var(--fg3);border:1px solid #d1d1d6;border-bottom-width:2px;border-radius:5px;padding:2px 5px}
+.dbtn.sug{background:var(--accent-soft);box-shadow:inset 0 0 0 1.5px rgba(0,113,227,.35)}
+.dbtn.sug small{color:var(--accent)}
+.trow{display:grid;grid-template-columns:24px 40px minmax(0,1fr) 70px 200px;align-items:center;gap:14px;padding:12px 16px;border-top:1px solid var(--line)}
+.trow:first-child{border-top:0}
+.trow input{width:17px;height:17px;accent-color:var(--accent)}
+.trow .rs{font-size:13px;color:var(--fg2)}
+.tfoot{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line);background:#fafafc;border-radius:0 0 var(--radius) var(--radius)}
+.tfoot .btn{margin-left:auto}
+.spot{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:var(--radius);background:#fff;border:1.5px dashed #c7c7cc}
+.spot .btn{flex:none}
+.done-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--fg2)}
+/* Пакет для заказчика */
+.cmp{width:100%;border-collapse:separate;border-spacing:0;margin-top:12px;font-size:13px}
+.cmp th{text-align:left;font-weight:600;color:var(--fg2);padding:8px 10px;border-bottom:1px solid var(--line)}
+.cmp td{padding:7px 10px;border-bottom:1px solid var(--line)}
+.cmp td.c,.cmp th.c{text-align:center}
+.cmp .st{height:22px}
+.picks{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.pick{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:10px;background:#f2f2f5;font-size:14px}
+.pick input{accent-color:var(--accent)}
+/* Ответы кандидата */
+.qa{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.qa .seg{margin:0}
+.qa .eff{font-size:12px;color:var(--fg2)}
+.qa .eff b{color:var(--accent)}
+.qa input{flex:1;min-width:160px;font:inherit;font-size:13px;border:0;border-bottom:1px solid var(--line);padding:5px 2px;outline:0;background:none}
+
 /* Текст резюме */
 .doc{position:sticky;top:80px;max-height:calc(100vh - 104px);overflow:auto;padding:14px 0;align-self:start}
 .doc h2{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);padding:0 18px 8px}
@@ -333,6 +384,8 @@ mark{background:none;color:inherit}
  <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/></symbol>
  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+ <symbol id="i-key" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M8 17h8"/></symbol>
+ <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.3 2A6 6 0 0 0 20 3v12a6 6 0 0 1-4.7 1c-2.3 0-4.3-2-7.3-2a6 6 0 0 0-4 1.5"/></symbol>
  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.5 21.7a.5.5 0 0 0 .9 0l6.5-19a.5.5 0 0 0-.6-.6l-19 6.5a.5.5 0 0 0 0 .9l7.9 3.2a2 2 0 0 1 1.1 1.1z"/><path d="m21.9 2.1-10.9 10.9"/></symbol>
@@ -346,7 +399,8 @@ mark{background:none;color:inherit}
 <header class="bar">
   <span class="logo"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>Сверка</span>
   <nav class="nav" aria-label="Разделы">
-    <button data-nav="base" aria-current="page"><svg class="i"><use href="#i-users"/></svg>Кандидаты<span class="badge num" id="navbadge"></span></button>
+    <button data-nav="triage" aria-current="page"><svg class="i"><use href="#i-inbox"/></svg>Разбор<span class="badge num" id="trbadge"></span></button>
+    <button data-nav="base"><svg class="i"><use href="#i-users"/></svg>Кандидаты<span class="badge num" id="navbadge"></span></button>
     <button data-nav="vac"><svg class="i"><use href="#i-brief"/></svg>Вакансии</button>
   </nav>
   <span class="spacer"></span>
@@ -482,7 +536,7 @@ const D={
   plus:[['Коммуникации с 50+ заказчиками, 60–70% возвращаются',16],['Таблицы и регулярная отчётность, сам автоматизирует выгрузки',14],['Работал с документооборотом на практике',21]],
   risk:[['Нет опыта в образовании и госструктурах',null],['Ищет удалённый или гибридный формат, вакансия — очная',11]],
   rec:'Пригласить на собеседование на куратора. Проверить готовность к очной работе в Долгопрудном.',
-  qs:['Готовы ли вы работать очно в Долгопрудном по графику 5/2?','Есть ли у вас личный ноутбук для дней удалённой работы?','Приходилось ли вам работать со школами, вузами или государственными организациями?','Как вы держите сроки, когда параллельно ведёте несколько заказчиков? Приведите пример.'],
+  qs:['Готовы ли вы работать очно в Долгопрудном по графику 5/2?','Есть ли у вас личный ноутбук для дней удалённой работы?','Приходилось ли вам работать со школами, вузами или государственными организациями?','Как вы держите сроки, когда параллельно ведёте несколько заказчиков? Приведите пример.'],qa:[9,8,4,1],
   mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию фронтенд-разработчика. По опыту коммуникаций с заказчиками и работы с отчётностью вам может лучше подойти другая наша вакансия — «Куратор образовательного процесса» (Центр развития ИТ-образования МФТИ).\n\nЕсли интересно, предлагаем созвониться на этой неделе.'},
  'c1:v2':{why:'<b>Вилка 26–87.</b> Резюме почти ничего не говорит об учёте: решают ответы на вопросы, а не балл.',
   req:[
@@ -555,7 +609,7 @@ const D={
   plus:[['14 лет с первичными документами и актами приёма-передачи',8],['Профильное образование «Финансы и кредит»',11],['Формат совпадает: работа на месте работодателя',4]],
   risk:[['Учёт ОС прямо не указан, сама пишет «готова осваивать»',13]],
   rec:'Пригласить. На собеседовании проверить учёт ОС и инвентаризацию.',
-  qs:['Участвовали ли вы в инвентаризации основных средств или ТМЦ?','Какие документы по движению имущества вы оформляли: перемещение, списание, ввод в эксплуатацию?'],
+  qs:['Участвовали ли вы в инвентаризации основных средств или ТМЦ?','Какие документы по движению имущества вы оформляли: перемещение, списание, ввод в эксплуатацию?'],qa:[5,1],
   mail:'Здравствуйте!\n\nСпасибо за отклик на вакансию специалиста по учёту основных средств МФТИ. Приглашаем на собеседование — предложите, пожалуйста, удобное время.'},
 };
 const TAGS={ // короткие метки в рейтинге
@@ -570,9 +624,12 @@ const BASE=[ // [ключ, статус, дата, лучшая вакансия
  ['x5','res','14.10','v3',61,0,'резерв с октября'],
  ['x6','res','02.10','v1',58,0,'резерв с октября'],
  ['x7','rej','28.09','v2',22,0,'отказ отправлен'],
+ ['k8','new','12.11','v2',14,1,'из отклики_frontend.zip'],
+ ['k9','new','12.11','v1',9,1,'из отклики_frontend.zip'],
+ ['k10','new','12.11','v1',47,1,'из отклики_frontend.zip'],
 ];
 const XC={x5:{n:5,real:'Орлова Мария',title:'Методист онлайн-курсов'},x6:{n:6,real:'Ким Сергей',title:'Junior Frontend (React)'},x7:{n:7,real:'Белов Олег',title:'Кладовщик'}};
-const PS={new:['новый','p-new'],rev:['на рассмотрении','p-rev'],inv:['приглашён','p-inv'],res:['в резерве','p-res'],rej:['отказ','p-rej']};
+const PS={new:['новый','p-new'],rev:['на рассмотрении','p-rev'],cust:['у заказчика','p-inv'],alt:['предложена другая вакансия','p-new'],inv:['приглашён','p-inv'],res:['в резерве','p-res'],rej:['отказ','p-rej']};
 const HIST={
  c1:[['12.11 10:42','Загружено резюме 1.docx · отклик на Frontend-разработчик',1],['12.11 10:43','Оценён по 3 вакансиям · лучше подходит «Куратор»',1],['12.11 10:43','Предложено: предложить другую вакансию',0]],
  c2:[['11.11 18:05','Загружено резюме 2.docx',1],['11.11 18:06','Оценён: Frontend 86 · подходит',1],['11.11 18:20','Статус: на рассмотрении',0]],
@@ -582,9 +639,24 @@ const HIST={
  x6:[['02.10 11:10','Загружено резюме',1],['05.10 14:00','Статус: в резерве',0]],
  x7:[['28.09 10:00','Загружено резюме',1],['29.09 12:00','Ответ отправлен: отказ с причинами',1]],
 };
+const EXTRA={k8:{n:8,real:'Соколов Пётр',title:'Кладовщик'},k9:{n:9,real:'Лебедева Анна',title:'Продавец-консультант'},k10:{n:10,real:'Зайцев Илья',title:'Junior Python-разработчик'}};
+Object.assign(XC,EXTRA);
+// [ключ, корзина, вакансия, балл, низ, верх, почему здесь, за[[текст,строка]], против[[текст,строка]], предложение 1..4]
+const TRI=[
+ ['c1','need','v3',72,71,76,'Откликнулся на Frontend, а лучше подходит «Куратор» — решение за вами',[['Коммуникации с 50+ заказчиками',16],['Таблицы и отчётность, автоматизирует выгрузки',14],['Документооборот на практике',21]],[['Нет опыта в образовании и госструктурах',null],['Ищет гибрид, вакансия очная',11],['По Frontend: нет коммерческого Vue и Tailwind',8]],2],
+ ['c4','need','v2',63,52,80,'Широкая вилка 52–80: учёт основных средств прямо не назван',[['14 лет с первичкой и актами приёма-передачи',8],['Профильное образование «Финансы и кредит»',11],['Формат совпадает: офис',4]],[['Сама пишет «готова осваивать учёт ОС»',13],['Инвентаризация не указана',null]],1],
+ ['k10','need','v1',47,30,78,'Балл у порога «частично», много «не указано»',[['Python и JavaScript в пет-проектах',null]],[['Vue не указан',null],['Коммерческого опыта меньше года',null]],3],
+ ['c2','fit','v1',86,84,90,'Все обязательные закрыты',[['4+ года Vue, миграция Vue 2 → 3',7],['Автотесты на Vitest',6]],[['Уровень выше Middle',8]],1],
+ ['c3','fit','v1',84,82,88,'Все обязательные закрыты',[['Ровно стек вакансии: Vue 3 + Tailwind',3]],[['«2 года» ≠ датам — резюме, похоже, от 02.2025',12]],1],
+ ['k8','nofit','v2',14,8,30,'Нет высшего экономического: «среднее специальное»',[],[],4],
+ ['k9','nofit','v1',9,4,25,'Нет опыта разработки: «опыта в IT нет»',[],[],4],
+ ['x7','nofit','v2',22,12,40,'Два обязательных требования опровергнуты',[],[],4],
+];
+const ACT=[null,['Заказчику','send','отправить на рассмотрение'],['Другая вакансия','arrow','предложить кандидату'],['В резерв','archive','вернуться при новой вакансии'],['Отказ','x','с причинами по делу']];
+const BK={need:'Нужно ваше решение',fit:'Явно подходят',nofit:'Явно не подходят',done:'Разобрано'};
 const cname=k=>C[k]?label(k):(st.pii?XC[k].real:'Кандидат '+XC[k].n);
 const ctitle=k=>C[k]?C[k].title:XC[k].title;
-let st={view:'base',cand:'c1',vac:'v3',tab:'req',pii:false,pair:false,flt:'all',bc:'c1',reply:null,rt:0,confirm:null,undo:null,upload:null};
+let st={view:'triage',cand:'c1',vac:'v3',tab:'req',pii:false,pair:false,flt:'all',bc:'c1',reply:null,rt:0,confirm:null,undo:null,upload:null,bk:'need',ti:0,tc:null,dec:{},spot:null,pack:null,ans:{}};
 const $=s=>document.querySelector(s);
 const key=(c,v)=>c+':'+v;
 const label=c=>st.pii?C[c].real:'Кандидат '+C[c].n;
@@ -599,9 +671,9 @@ const piiTog=()=>`<label class="switch">ФИО и пол <button class="tog" rol
 /* ---------- Верх: вид «кандидат» ---------- */
 function topCand(){
   const c=st.cand, x=C[c], ks=order(VK.map(v=>key(c,v))), best=ks[0].split(':')[1];
-  let h=`<button class="back" data-nav="base">${ic('chev','i-sm')}Кандидаты</button><div class="head"><span class="avatar">${ic('user')}</span><div class="who"><h1>${label(c)}</h1>
+  let h=`<button class="back" data-nav="${st.from||'base'}">${ic('chev','i-sm')}${{triage:'Разбор откликов',base:'Кандидаты',vac:'Вакансии'}[st.from||'base']}</button><div class="head"><span class="avatar">${ic('user')}</span><div class="who"><h1>${label(c)}</h1>
     <div class="sub"><span>${ic('brief','i-sm')}${x.title}</span><span>${ic('inbox','i-sm')}отклик на «${VAC[x.applied].t}»</span><span>${ic('file','i-sm')}${x.file}</span></div></div>
-    <div class="side"><span style="display:flex;gap:8px"><button class="btn btn-ghost" data-reply="${c}">${ic('send','i-sm')}Ответить</button><button class="btn btn-ghost">${ic('download','i-sm')}Экспорт</button></span>${piiTog()}</div></div>`;
+    <div class="side"><span style="display:flex;gap:8px"><button class="btn btn-ghost" data-gobase="${c}">${ic('hist','i-sm')}Карточка и история</button><button class="btn btn-ghost" data-reply="${c}">${ic('send','i-sm')}Ответить</button><button class="btn btn-ghost" data-pack="${st.vac}">${ic('download','i-sm')}Для заказчика</button></span>${piiTog()}</div></div>`;
   if(best!==x.applied){const a=S[key(c,best)][0],b=S[key(c,x.applied)][0];
     h+=`<div class="callout"><span class="ico">${ic('arrow')}</span><div><b>Лучше подходит «${VAC[best].t}»: ${a} против ${b}</b> у вакансии отклика. Решают коммуникации с 50+ заказчиками и работа с таблицами. По фронтенду нет коммерческого Vue и Tailwind.</div><button class="btn btn-white" data-vac="${best}">Открыть</button></div>`;}
   h+=`<div class="card rank" role="listbox" aria-label="Рейтинг вакансий">`+ks.map((k,i)=>{const v=k.split(':')[1],vv=verdict(S[k][0]);
@@ -644,6 +716,12 @@ function pairCard(ca,cb,sa,sb){
 }
 
 /* ---------- Общие блоки ---------- */
+function pairScore(x,u){let num=0,den=0;for(const r of x.req){const w=r[0]==='Обязательные'?3:r[0].startsWith('Условия')?0:1; if(!w) continue; const v=r[2]==='full'?1:r[2]==='partial'?.5:r[2]==='no'?0:u; num+=w*v; den+=w;} return den?num/den*100:0;}
+function answer(i,val){const k=key(st.cand,st.vac), x=D[k], ri=x.qa[i], r=x.req[ri]; const before=[pairScore(x,.25),pairScore(x,0),pairScore(x,1)];
+  if(!r.orig) r.orig=[r[2],r[4]]; r[2]=val==='yes'?'full':val==='part'?'partial':'no'; r[4]='со слов кандидата';
+  st.ans[k+':'+i]=val; const after=[pairScore(x,.25),pairScore(x,0),pairScore(x,1)];
+  const s=S[k]; s[0]=Math.round(s[0]+after[0]-before[0]); s[1]=Math.round(s[1]+after[1]-before[1]); s[2]=Math.round(s[2]+after[2]-before[2]); s[3]=x.req.filter(q=>q[0]==='Обязательные'&&q[2]==='no').length;
+  render(); toast(`Пересчитано: ${VAC[st.vac].t} — ${s[0]} (вилка ${s[1]}–${s[2]})`);}
 function renderSummary(){
   const x=D[key(st.cand,st.vac)], t=st.view==='cand'?VAC[st.vac].t:label(st.cand);
   if(!x){$('#summary').innerHTML=`<div class="sum-h">${ic('bulb','c-acc')}Кратко <span class="of">· ${t}</span></div><div class="stub">${ic('help')}В макете подробности есть не для всех пар: смотрите Frontend-разработчика, учёт ОС или куратора у Кандидата 1.</div>`;return;}
@@ -667,7 +745,9 @@ function renderPane(){
       const q=r[3].length?quote(r[3]):(r[2]==='unknown'?`<span class="ask">${ic('chat','i-sm')}не упоминается → вопрос кандидату</span>`:'');
       h+=`<button class="req" data-i="${i}"><span class="st s-${r[2]}">${ic(ST[r[2]][1])}${ST[r[2]][0]}</span><span><div class="txt">${r[1]}${fl}</div><div class="q">${q}</div></span></button>`; });
   } else if(st.tab==='qs'){
-    h=`<div class="why" style="display:flex;gap:6px;align-items:center">${ic('shield','c-full')}Из строк «не указано», «частично» и несостыковок. Вопросы о семье, здоровье, возрасте отсекает фильтр.</div><ul class="list">${x.qs.map(q=>`<li>${ic('chat','c-acc')}<span>${q}</span></li>`).join('')}</ul>`;
+    const qa=x.qa||[];
+    h=`<div class="why" style="display:flex;gap:6px;align-items:center">${ic('shield','c-full')}Из строк «не указано», «частично» и несостыковок. Вопросы о семье, здоровье, возрасте отсекает фильтр. Отметьте ответ после разговора — оценка пересчитается.</div><ul class="list">${x.qs.map((q,i)=>{const ri=qa[i], a=st.ans[key(st.cand,st.vac)+':'+i], r=ri!=null?x.req[ri]:null;
+      return `<li>${ic('chat','c-acc')}<span style="flex:1">${q}${r?`<div class="qa"><div class="seg">${[['yes','Да'],['part','Частично'],['no','Нет']].map(([v,l])=>`<button aria-pressed="${a===v}" data-qa="${v}" data-q="${i}">${l}</button>`).join('')}</div><span class="eff">${a?`→ «${r[1]}»: <b>${ST[r[2]][0]}</b> · со слов кандидата`:`влияет на «${r[1]}»`}</span><input placeholder="заметка рекрутера" aria-label="Заметка"></div>`:''}</span></li>`}).join('')}</ul>`;
   } else {
     h=x.mail?`<div class="why">Черновик — отправляет рекрутер.</div><div class="letter">${x.mail}</div><div class="actions"><button class="btn btn-ghost">${ic('copy','i-sm')}Скопировать</button></div>`:'<div class="why">Для этой пары письма нет.</div>';
   }
@@ -701,7 +781,7 @@ function topBase(){
     <div class="qfiles"><span class="qf ok">${ic('check','i-sm')}8 готово</span><span class="qf run">${ic('clock','i-sm')}резюме_Ким.pdf · распознаём скан</span><span class="qf err">${ic('alert','i-sm')}фото_резюме.jpg · скан плохого качества, проверьте вручную</span></div></div>
    <div class="callout"><span class="ico">${ic('archive')}</span><div><b>Новая вакансия «Куратор образовательного процесса»: в резерве нашёлся 1 подходящий.</b> Кандидат 5 (резерв с октября) — 61, частично.</div><button class="btn btn-white" data-bc="x5">Показать</button></div>
    <div class="card rank"><div class="tools"><span class="search">${ic('search','i-sm')}Поиск по навыкам, должности…</span><div class="chips">
-    ${[['all','Все'],['new','Новые'],['rev','На рассмотрении'],['inv','Приглашены'],['res','Резерв'],['rej','Отказ']].map(([k,t])=>`<button class="chip" aria-pressed="${st.flt===k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join('')}</div></div>
+    ${[['all','Все'],['new','Новые'],['cust','У заказчика'],['alt','Другая вакансия'],['inv','Приглашены'],['res','Резерв'],['rej','Отказ']].map(([k,t])=>`<button class="chip" aria-pressed="${st.flt===k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join('')}</div></div>
    ${BASE.filter(r=>st.flt==='all'||r[1]===st.flt).map(([k,s,d,v,sc,w,src])=>{const vv=verdict(sc);return `<button class="crow" aria-selected="${k===st.bc}" data-bc="${k}">
      <span class="tile round ${vv[2]}">${ic('user')}</span>
      <span><div class="t" style="font-weight:600">${cname(k)}</div><div class="meta"><span>${ic('brief','i-sm')}${ctitle(k)}</span><span>${ic('cal','i-sm')}${d}</span><span>${src}</span></div></span>
@@ -709,6 +789,50 @@ function topBase(){
      <span><span class="pill ${PS[s][1]}">${PS[s][0]}</span>${w?`<div class="wait">${ic('bell','i-sm')}ждёт ${w} дн.</div>`:''}</span>
      <span class="reply btn btn-ghost" data-reply="${k}">${ic('send','i-sm')}Ответить</span></button>`}).join('')}</div>`;
   return h;
+}
+function topTriage(){
+  const left=TRI.filter(r=>!st.dec[r[0]]), cnt=b=>b==='done'?Object.keys(st.dec).length:left.filter(r=>r[1]===b).length;
+  const pct=Math.round(Object.keys(st.dec).length/TRI.length*100);
+  let h=`<div class="head"><span class="avatar blue">${ic('inbox')}</span><div class="who"><h1>Разбор откликов</h1>
+    <div class="sub"><span>${ic('upload','i-sm')}отклики_frontend.zip · ${TRI.length} откликов</span><span>${ic('check','i-sm')}разобрано ${Object.keys(st.dec).length} из ${TRI.length}</span></div></div>
+    <div class="side">${piiTog()}</div></div>
+   <div><div class="buckets">${['need','fit','nofit','done'].map(b=>`<button class="bk" aria-pressed="${st.bk===b}" data-bk="${b}">${BK[b]} <span class="num">${cnt(b)}</span></button>`).join('')}</div>
+   <div class="prog"><i style="width:${pct}%"></i></div></div>`;
+  const rows=left.filter(r=>r[1]===st.bk);
+  if(st.bk==='need'){
+    if(!rows.length) return h+`<div class="card tcard"><div class="stub">${ic('check','c-full')}Все отклики, где нужно ваше решение, разобраны.<button class="btn btn-ghost" data-bk="fit" style="margin-left:auto">Явно подходят</button><button class="btn btn-ghost" data-bk="nofit">Явно не подходят</button></div></div>`;
+    st.ti=Math.min(st.ti,rows.length-1); const r=rows[st.ti]; st.tc=r[0]; const vv=verdict(r[3]);
+    const pts=(a,icn,c)=>a.map(([t,n])=>`<button class="pt"${n?` data-l="${n}"`:''}>${ic(icn,c)}<span>${t}${n?`<span class="ref">L${n}</span>`:''}</span></button>`).join('');
+    h+=`<div class="card tcard"><div class="tc-top"><span class="avatar" style="width:44px;height:44px">${ic('user')}</span><div><h2>${cname(r[0])}</h2><div class="sub" style="margin-top:2px"><span>${ic('brief','i-sm')}${ctitle(r[0])}</span></div></div>
+      <div class="tc-nav"><button data-tn="-1" aria-label="Предыдущий">${ic('chev','i-sm')}</button><span class="num">${st.ti+1} из ${rows.length}</span><button data-tn="1" aria-label="Следующий" style="transform:scaleX(-1)">${ic('chev','i-sm')}</button></div></div>
+     <div class="tc-best"><span class="big num">${r[3]}</span><span><b>${VAC[r[2]].t}</b><div class="lbl num">лучшая вакансия · вилка ${r[4]}–${r[5]}</div></span><span class="verdict ${vv[1]}">${ic(vv[3],'i-sm')}${vv[0]}</span></div>
+     <div class="why-here">${ic('flag','i-sm')}${r[6]}</div>
+     <div class="pc"><div><div class="h3">${ic('spark','c-full')}За</div>${pts(r[7],'check','c-full')}</div><div><div class="h3">${ic('alert','c-part')}Против</div>${pts(r[8],'alert','c-part')}</div></div>
+     <div class="decide">${[1,2,3,4].map(i=>`<button class="dbtn ${r[9]===i?'sug':''}" data-act="${i}"><b>${ic(ACT[i][1],'i-sm')}${ACT[i][0]}<kbd>${i}</kbd></b><small>${r[9]===i?'предлагает система':ACT[i][2]}</small></button>`).join('')}</div>
+     <div class="actions" style="margin-top:12px">${C[r[0]]?`<button class="btn btn-ghost" data-open="${r[0]}">${ic('list','i-sm')}Открыть разбор <kbd style="font:600 11px ui-monospace;color:var(--fg3)">Enter</kbd></button>`:''}<span class="why" style="padding:0;margin-left:auto">${ic('key','i-sm')} 1–4 — решение, ← → — листать</span></div></div>`;
+  } else if(st.bk==='done'){
+    const d=TRI.filter(r=>st.dec[r[0]]);
+    h+=`<div class="card rank">${d.length?d.map(r=>`<div class="trow" role="button" data-gobase="${r[0]}" style="cursor:pointer" title="Открыть карточку в «Кандидатах»"><span></span><span class="tile round t-bad">${ic('user')}</span><span><b>${cname(r[0])}</b><div class="rs">${VAC[r[2]].t}</div></span><span class="num"><b>${r[3]}</b></span><span class="done-chip">${ic(ACT[st.dec[r[0]]][1],'i-sm')}${ACT[st.dec[r[0]]][0]}</span></div>`).join(''):`<div class="stub" style="padding:16px">${ic('help')}Пока ничего не разобрано. Начните с «Нужно ваше решение».</div>`}</div>`;
+  } else {
+    const fit=st.bk==='fit';
+    h+=(!fit&&rows.some(r=>r[0]==='x7')&&!st.spot?`<div class="spot">${ic('help','c-acc i-lg')}<div><b>Выборочная проверка.</b> Согласны, что ${cname('x7')} не подходит на «${VAC.v2.t}»? Причина: два обязательных требования опровергнуты.<div class="lbl">Каждый десятый отклик из «явно не подходят» система показывает вам отдельно.</div></div><button class="btn btn-ghost" data-spot="no">Не согласен</button><button class="btn btn-primary" data-spot="yes">Согласен</button></div>`:'');
+    h+=`<div class="card rank">${rows.map(r=>`<label class="trow"><input type="checkbox" checked data-pickrow="${r[0]}"><span class="tile round ${fit?'t-ok':'t-bad'}">${ic('user')}</span><span><b>${cname(r[0])}</b><div class="rs">${ic(fit?'check':'x','i-sm')} ${r[6]}</div></span><span class="num"><b>${r[3]}</b> <span class="lbl" style="display:inline">${r[4]}–${r[5]}</span></span><span class="rs">${VAC[r[2]].t}</span></label>`).join('')||`<div class="stub" style="padding:16px">${ic('check','c-full')}Пусто.</div>`}
+     ${rows.length?`<div class="tfoot"><span class="why" style="padding:0">${fit?'Система предлагает отправить заказчику. Решение — ваше.':'Система предлагает отказ с причинами. Автоотказа нет — нужно ваше подтверждение.'}</span>${fit?`<button class="btn btn-primary" data-pack="v1">${ic('send','i-sm')}Пакет для заказчика (${rows.length})</button>`:`<button class="btn btn-ghost" data-batch="4">${ic('x','i-sm')}Подтвердить отказ (${rows.length})</button>`}</div>`:''}</div>`;
+  }
+  return h;
+}
+function renderPack(){
+  const old=$('#pack'); if(old) old.remove(); if(!st.pack) return;
+  const v=st.pack, cands=['c2','c3'].filter(k=>D[key(k,v)]), sel=cands, d=document.createElement('div'); d.id='pack'; d.className='scrim';
+  const must=D[key(cands[0],v)].req.map((r,i)=>[r,i]).filter(([r])=>r[0]==='Обязательные');
+  d.innerHTML=`<div class="sheet" role="dialog" aria-label="Пакет для заказчика" style="width:min(760px,calc(100vw - 32px))"><h3>${ic('send','c-acc i-lg')}Пакет для заказчика · ${VAC[v].t}</h3>
+   <div class="picks">${cands.map(k=>`<label class="pick"><input type="checkbox" checked>${cname(k)} <b class="num">${S[key(k,v)][0]}</b></label>`).join('')}<label class="switch" style="margin-left:auto">ФИО в документе <button class="tog" role="switch" aria-checked="${st.pii}" id="pii"></button></label></div>
+   <table class="cmp"><thead><tr><th>Обязательные требования</th>${sel.map(k=>`<th class="c">${cname(k)}</th>`).join('')}</tr></thead><tbody>
+   ${must.map(([r,i])=>`<tr><td>${r[1]}</td>${sel.map(k=>{const x=D[key(k,v)].req[i];return `<td class="c"><span class="st s-${x[2]}">${ic(ST[x[2]][1])}${ST[x[2]][0]}</span></td>`}).join('')}</tr>`).join('')}
+   </tbody></table>
+   <div class="hint" style="display:flex;gap:6px;align-items:center">${ic('file','i-sm')}В документе: эта таблица, по каждому кандидату — «Кратко», риски, вопросы на собеседование и исходное резюме.</div>
+   <div class="actions"><button class="btn btn-ghost" data-pclose>Отмена</button><button class="btn btn-ghost">${ic('copy','i-sm')}Текст письма заказчику</button><button class="btn btn-ghost">${ic('download','i-sm')}PDF</button><button class="btn btn-primary" data-psent>${ic('download','i-sm')}Скачать DOCX</button></div></div>`;
+  document.body.appendChild(d);
 }
 function renderCard(){
   if(!BASE.find(r=>r[0]===st.bc)) st.bc=BASE[0][0];
@@ -767,46 +891,67 @@ function renderConfirm(){
    <div class="row"><button class="btn btn-ghost" data-cancel>Отмена</button><button class="btn ${res?'btn-primary':'btn-red'}" data-ok>${res?'В резерв':'Удалить'}</button></div></div>`;
   document.body.appendChild(d);
 }
+const DEC2ST={1:'cust',2:'alt',3:'res',4:'rej'};
+const showIn=(k,flt)=>()=>{st.view='base';st.flt=flt;st.bc=k;render();window.scrollTo({top:0});};
+function setStatus(k,stt,txt){const r=BASE.find(x=>x[0]===k); if(!r) return null; const prev=[r[1],r[5]]; r[1]=stt; r[5]=0; (HIST[k]=HIST[k]||[]).push([stamp(),txt,1]); return ()=>{r[1]=prev[0];r[5]=prev[1];HIST[k].pop();};}
+function decide(k,a){ if(!k) return; st.dec[k]=a; const back=setStatus(k,DEC2ST[a],'Решение в разборе: '+ACT[a][0].toLowerCase()); render();
+  toast(`${cname(k)} → ${PS[DEC2ST[a]][0]}`,()=>{delete st.dec[k]; back&&back();},['Показать в «Кандидатах»',showIn(k,DEC2ST[a])]); }
+document.addEventListener('keydown',e=>{ if(st.view!=='triage'||st.bk!=='need'||e.target.closest('input,textarea,select')||st.reply||st.pack||st.confirm) return;
+  if(['1','2','3','4'].includes(e.key)){decide(st.tc,+e.key);} else if(e.key==='ArrowRight'){st.ti++;render();} else if(e.key==='ArrowLeft'){st.ti=Math.max(0,st.ti-1);render();} else if(e.key==='Enter'&&C[st.tc]){st.from='triage'; st.view='cand';st.cand=st.tc;st.vac=bestVac(st.cand);render();}});
 let toastTimer;
-function toast(text,undo){
+function toast(text,undo,go){
   const old=$('#toast'); if(old) old.remove(); clearTimeout(toastTimer);
-  const d=document.createElement('div'); d.id='toast'; d.className='toast'; d.innerHTML=`<span>${text}</span>${undo?'<button data-undo>Отменить</button>':''}`;
-  document.body.appendChild(d); st.undo=undo||null; toastTimer=setTimeout(()=>{d.remove();st.undo=null;},4500);
+  const d=document.createElement('div'); d.id='toast'; d.className='toast'; d.innerHTML=`<span>${text}</span>${go?`<button data-go>${go[0]}</button>`:''}${undo?'<button data-undo>Отменить</button>':''}`;
+  document.body.appendChild(d); st.undo=undo||null; st.go=go?go[1]:null; toastTimer=setTimeout(()=>{d.remove();st.undo=null;st.go=null;},6000);
 }
 function stamp(){const n=new Date();return `12.11 ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`}
 function render(){
-  const base=st.view==='base';
-  $('#summary').hidden=base; document.querySelector('.detail').hidden=base;
-  $('#top').innerHTML=base?topBase():st.view==='cand'?topCand():topVac();
-  if(base){renderCard();} else {renderSummary(); renderPane(); renderDoc();}
+  const base=st.view==='base', tri=st.view==='triage', lite=base||tri;
+  $('#summary').hidden=lite; document.querySelector('.detail').hidden=lite;
+  $('#top').innerHTML=tri?topTriage():base?topBase():st.view==='cand'?topCand():topVac();
+  if(base){renderCard();} else if(tri){ if(st.tc&&C[st.tc]){const c=st.cand; st.cand=st.tc; renderDoc(); st.cand=c;} else $('#doc').innerHTML=`<div class="stub" style="padding:18px">${ic('file')}Текст резюме показан для кандидатов 1–4 кейса.</div>`; } else {renderSummary(); renderPane(); renderDoc();}
+  renderPack();
   renderSheet(); renderConfirm(); renderUpload();
   document.querySelectorAll('[data-nav]').forEach(b=>{if(b.closest('.nav')) b.toggleAttribute('aria-current',(st.view==='vac')===(b.dataset.nav==='vac')); if(b.getAttribute('aria-current')!==null) b.setAttribute('aria-current','page');});
   $('#navbadge').textContent=BASE.filter(r=>r[5]>0).length||'';
+  $('#trbadge').textContent=TRI.filter(r=>!st.dec[r[0]]).length||'';
+  document.querySelectorAll('.nav [data-nav]').forEach(b=>{const on=(st.view==='triage'&&b.dataset.nav==='triage')||((st.view==='base'||st.view==='cand')&&b.dataset.nav==='base')||(st.view==='vac'&&b.dataset.nav==='vac'); if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');});
 }
 const bestCand=v=>order(CK.map(c=>key(c,v)))[0].split(':')[0];
 const bestVac=c=>order(VK.map(v=>key(c,v)))[0].split(':')[1];
 
 document.addEventListener('click',e=>{
   const t=e.target;
+  const gb=t.closest('[data-gobase]'); if(gb){showIn(gb.dataset.gobase,'all')();return;}
+  const bk=t.closest('[data-bk]'); if(bk){st.bk=bk.dataset.bk;st.ti=0;render();return;}
+  const tn=t.closest('[data-tn]'); if(tn){st.ti=Math.max(0,st.ti+ +tn.dataset.tn);render();return;}
+  const ac=t.closest('[data-act]'); if(ac){decide(st.tc,+ac.dataset.act);return;}
+  const bt=t.closest('[data-batch]'); if(bt){const ks=[...document.querySelectorAll('[data-pickrow]:checked')].map(x=>x.dataset.pickrow); const backs=ks.map(k=>{st.dec[k]=4; return setStatus(k,'rej','Отказ подтверждён в разборе');}); render(); toast(`Отказ подтверждён: ${ks.length}`,()=>{ks.forEach(k=>delete st.dec[k]); backs.forEach(b=>b&&b());},['Открыть отказы',showIn(ks[0],'rej')]); return;}
+  const sp=t.closest('[data-spot]'); if(sp){st.spot=sp.dataset.spot; if(sp.dataset.spot==='no'){const r=TRI.find(x=>x[0]==='x7'); r[1]='need'; } render(); toast(sp.dataset.spot==='yes'?'Спасибо — проверка записана':'Несогласие записано, отклик перенесён в «Нужно ваше решение»'); return;}
+  const pk=t.closest('[data-pack]'); if(pk){st.pack=pk.dataset.pack;renderPack();return;}
+  if(t.closest('[data-pclose]')||t.id==='pack'){st.pack=null;renderPack();return;}
+  if(t.closest('[data-psent]')){const ks=['c2','c3']; ks.forEach(k=>{st.dec[k]=1; setStatus(k,'cust','Отправлен заказчику в пакете');}); st.pack=null; render(); toast('Пакет скачан · кандидаты 2 и 3 — «у заказчика»',null,['Открыть «У заказчика»',showIn('c2','cust')]); return;}
+  const qa=t.closest('[data-qa]'); if(qa){answer(+qa.dataset.q,qa.dataset.qa);return;}
   const up=t.closest('[data-upload]'); if(up){st.upload=up.dataset.upload||(st.view==='vac'?'vac':'res');renderUpload();return;}
   const ut=t.closest('[data-utab]'); if(ut){st.upload=ut.dataset.utab;renderUpload();return;}
   if(t.closest('[data-uclose]')||t.id==='upload'){st.upload=null;renderUpload();return;}
   if(t.closest('[data-ugo]')){const r=st.upload==='res'; st.upload=null; renderUpload(); if(r){st.view='base';render();toast('Файлы в очереди — прогресс в «Кандидатах»');} else toast('Добавлено 2 вакансии · сверяем с резервом'); return;}
   if(t.closest('.sheet')&&!t.closest('button')) return;
-  const nv=t.closest('[data-nav]'); if(nv){st.view=nv.dataset.nav; if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} st.pair=false; render(); window.scrollTo({top:0}); return;}
+  const nv=t.closest('[data-nav]'); if(nv){st.view=nv.dataset.nav; if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} st.pair=false; st.from=null; render(); window.scrollTo({top:0}); return;}
+  if(t.closest('[data-go]')&&st.go){const g=st.go; $('#toast').remove(); st.go=null; g(); return;}
   if(t.closest('[data-undo]')&&st.undo){st.undo();$('#toast').remove();render();return;}
   const cf=t.closest('[data-confirm]'); if(cf){st.confirm={kind:cf.dataset.confirm,k:st.bc};renderConfirm();return;}
   if(t.closest('[data-cancel]')||t.id==='confirm'){st.confirm=null;renderConfirm();return;}
   if(t.closest('[data-ok]')){const {kind,k}=st.confirm, n=cname(k); st.confirm=null;
-    if(kind==='res'){const r=BASE.find(x=>x[0]===k), prev=r[1]; r[1]='res'; (HIST[k]=HIST[k]||[]).push([stamp(),'Статус: в резерве',0]); render(); toast(`${n} в резерве`,()=>{r[1]=prev;HIST[k].pop();});}
+    if(kind==='res'){const back=setStatus(k,'res','Статус: в резерве'); render(); toast(`${n} в резерве`,back,['Открыть резерв',showIn(k,'res')]);}
     else {const i=BASE.findIndex(x=>x[0]===k); BASE.splice(i,1); render(); toast(`${n} удалён со всеми данными`);}
     return;}
-  if(t.closest('[data-sent]')){const k=st.reply, r=BASE.find(x=>x[0]===k); r[5]=0; (HIST[k]=HIST[k]||[]).push([stamp(),'Ответ отправлен: '+RT[st.rt][0].toLowerCase(),1]); st.reply=null; render(); toast('Ответ отмечен отправленным'); return;}
+  if(t.closest('[data-sent]')){const k=st.reply, r=BASE.find(x=>x[0]===k); r[5]=0; (HIST[k]=HIST[k]||[]).push([stamp(),'Ответ отправлен: '+RT[st.rt][0].toLowerCase(),1]); st.reply=null; render(); toast('Ответ отмечен отправленным',null,['История кандидата',showIn(k,'all')]); return;}
   if(t.closest('[data-close]')||t.id==='sheet'){st.reply=null;renderSheet();return;}
   const rt=t.closest('[data-rt]'); if(rt){st.rt=+rt.dataset.rt;renderSheet();return;}
   const rp=t.closest('[data-reply]'); if(rp){st.reply=rp.dataset.reply;st.rt=0;renderSheet();return;}
   const fl=t.closest('[data-flt]'); if(fl){st.flt=fl.dataset.flt;render();return;}
-  const op=t.closest('[data-open]'); if(op){st.view='cand';st.cand=op.dataset.open;st.vac=bestVac(st.cand);render();window.scrollTo({top:0});return;}
+  const op=t.closest('[data-open]'); if(op){st.from=st.view==='cand'?st.from:st.view; st.view='cand';st.cand=op.dataset.open;st.vac=bestVac(st.cand);render();window.scrollTo({top:0});return;}
   const bc=t.closest('[data-bc]'); if(bc){st.bc=bc.dataset.bc;render();return;}
   if(t.closest('#pairbtn')){st.pair=!st.pair;render();return;}
   if(t.closest('#pii')){st.pii=!st.pii;render();return;}
