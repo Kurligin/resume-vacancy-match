@@ -185,6 +185,19 @@ class VacancyItem(BaseModel):
     reserve_error: str = ""
 
 
+class VacancyCandidate(BaseModel):
+    id: int
+    status: CandidateStatus
+    resume_id: int
+    score: float
+    low: float
+    high: float
+    verdict: Verdict
+    blockers: list[str]  # тексты невыполненных обязательных требований
+    position: str | None = None
+    name: str | None = None  # ФИО — только по pii=true
+
+
 class Health(BaseModel):
     mode: str
     model: str
@@ -535,6 +548,24 @@ def create_app(
         except KeyError as e:
             raise not_found(e) from e
         return {"ok": True}
+
+    @app.get(
+        "/api/vacancies/{vacancy_id}/candidates",
+        summary="Рейтинг кандидатов по вакансии",
+        description="Оценки последней версии резюме каждого кандидата, лучшие сверху.",
+    )
+    def vacancy_candidates(
+        vacancy_id: str, user: Recruiter, pii: bool = False
+    ) -> list[VacancyCandidate]:
+        try:
+            rows = store.vacancy_candidates(db, vacancy_id)
+        except KeyError as e:
+            raise not_found(e) from e
+        extra = flow(user, pii, [r["id"] for r in rows])
+        return [
+            VacancyCandidate(**r, position=extra[r["id"]].position, name=extra[r["id"]].name)
+            for r in rows
+        ]
 
     # --- кандидаты ---
 

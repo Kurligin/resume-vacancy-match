@@ -190,6 +190,25 @@ def test_new_vacancy_checks_reserve(api: TestClient, fake: SwitchFake) -> None:
     assert api.post("/api/vacancies", data={"text": "  "}).status_code == 422
 
 
+def test_vacancy_candidates(app: FastAPI, api: TestClient, fake: SwitchFake) -> None:
+    v1 = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    files = wait_batch(api, upload(api, [("a.txt", resume(1)), ("b.txt", resume(2))]))
+    rows = api.get(f"/api/vacancies/{v1}/candidates").json()
+    assert {r["id"] for r in rows} == {f["candidate_id"] for f in files}
+    assert [r["score"] for r in rows] == sorted((r["score"] for r in rows), reverse=True)
+    r = rows[0]
+    assert r["low"] <= r["score"] <= r["high"] and r["verdict"] and r["status"] == "new"
+    assert r["resume_id"] == api.get(f"/api/candidates/{r['id']}").json()["versions"][0]["id"]
+    assert all(isinstance(b, str) for b in r["blockers"])
+
+    fake.full = True  # вакансия, по которой у кандидатов ещё нет оценок, — пустой рейтинг
+    v2 = add_vacancy(api, "Python-аналитик\nТребования: Python")
+    assert api.get(f"/api/vacancies/{v2}/candidates").json() == []
+    assert api.get("/api/vacancies/999/candidates").status_code == 404
+    with client(app, "manager") as boss:
+        assert boss.get(f"/api/vacancies/{v1}/candidates").status_code == 403
+
+
 def test_health_docs_static(api: TestClient) -> None:
     h = api.get("/api/health").json()
     assert h["mode"] == "live" and h["model"] == "fake" and h["version"]

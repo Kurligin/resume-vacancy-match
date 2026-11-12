@@ -23,6 +23,7 @@ from rvm.store.db import (
     open_vacancies,
     save_report,
     set_status,
+    vacancy_candidates,
 )
 from rvm.store.flow import (
     UNDECIDED,
@@ -64,4 +65,5 @@ __all__ = [
     "spot_answers",
     "stats",
     "summaries",
+    "vacancy_candidates",
 ]
