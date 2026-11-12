@@ -24,23 +24,9 @@ _LINK = re.compile(
     r"|hh\.ru/resume|habr\.com)(?:/\S*)?"
 )
 # сайт без схемы на любой зоне: личный (ivanov.dev) от сайта работодателя не отличить —
-# маскируем любой, кроме навыков и файлов (_site_kept)
+# маскируем любой, кроме навыков справочника (_skill_token)
 # начало только с начала токена: иначе на длинном «a-a-a…» квадратичный откат
 _SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:[a-z]{2,12}|рф)\b(?:/\S*)?")
-# настоящие зоны: «навык.зона» на них — всё-таки сайт
-_ZONES = frozenset(
-    re.findall(
-        r"\w+", "ru com рф me io org net su dev pro tech info site edu app xyz online space blog"
-    )
-)
-# расширения файлов и кода: main.py, package.json — не сайты
-_CODE_EXT = frozenset(
-    re.findall(
-        r"\w+",
-        "js ts jsx tsx mjs py ipynb html htm css scss json yaml yml xml md txt csv sql sh go rb php"
-        " java kt cs cpp hpp vue toml ini cfg conf env lock log pdf doc docx xls xlsx png jpg svg",
-    )
-)
 # ник без «@» после метки мессенджера или сети: «Telegram: ivan_petrov»
 _NICK_LABEL = re.compile(
     r"(?i)(?P<label>(?<![\w-])(?:telegram|телеграмм?|tg|тг|skype|скайп|github|gitlab|vk|вк"
@@ -129,6 +115,19 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 _DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
 _ROUGH_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:\w[\w-]*\.\w{{2,}}|{_MAILBOX}\b)")
 _AT_LEAK = re.compile(r"@(?!\s*(?:\d|$))")
+# любой «слово.зона», в т. ч. после «.»/«-» внутри цепочки; начало слова — против отката
+_ROUGH_DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:[a-z]{2,12}|рф)(?!\w)")
+# латинские слова имени файла — не ФИО (остальная латиница имени файла закрывается)
+_NOT_NAMES = frozenset(
+    re.findall(
+        r"\w+",
+        "cv resume rezume summary portfolio developer engineer programmer frontend backend"
+        " fullstack full stack senior middle junior lead teamlead techlead analyst manager"
+        " designer qa tester devops intern head chief specialist data scientist software web"
+        " mobile final new updated update version ver copy draft hh ru en eng rus my the and of"
+        " for in",
+    )
+)
 _MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
 _NAME_TAGS = ("Name", "Surn", "Patr")
@@ -155,6 +154,8 @@ class Masked(BaseModel):
     replacements: list[tuple[int, str, str]]
     contact_hashes: list[str]
     found: dict[str, int]
+    # ФИО из имени файла — только локально, для проверки assert_clean
+    name_words: list[str] = []
 
 
 @cache
@@ -233,17 +234,25 @@ def _pair_spans(text: str, head: bool) -> list[tuple[int, int]]:
 
 def _filename_words(filename: str) -> list[str]:
     """ФИО из имени файла: кириллица с заглавной, которую словарь знает как имя или не знает
-    вовсе, и латиница, чей транслит — имя. Навыки справочника не берём: «Python Developer»."""
-    words = re.findall(r"[А-ЯЁA-Z][а-яёa-z]+(?:-[А-ЯЁA-Z][а-яёa-z]+)?", Path(filename).stem)
+    вовсе, и любая латиница, кроме _NOT_NAMES. Навыки справочника не берём: «Python»."""
+    words = re.findall(r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?|[A-Za-z]{2,}", Path(filename).stem)
     out = []
     for w in words:
         if _LATIN.fullmatch(w):
-            name = bool(_name_tags(w))
+            name = w.lower() not in _NOT_NAMES
         else:
             name = _is_name(w) or not _morph().word_is_known(w)
         if name and canonical(w) is None:
             out.append(w)
     return out
+
+
+def _raw_words(words: list[str]) -> re.Pattern[str] | None:
+    """Латинские слова имени файла как есть, без учёта регистра, по границам букв."""
+    latin = [re.escape(w) for w in words if _LATIN.fullmatch(w)]
+    if not latin:
+        return None
+    return re.compile(r"(?i)(?<![^\W\d_])(?:" + "|".join(latin) + r")(?![^\W\d_])")
 
 
 def _person_spans(text: str) -> list[tuple[int, int]]:
@@ -275,17 +284,12 @@ def _name_tokens(
     return out
 
 
-def _site_kept(text: str, m: re.Match[str]) -> bool:
-    """Доменоподобный токен — не сайт: навык из справочника (Socket.io, ASP.NET, Mail.ru Cloud),
-    файл (main.py) или член навыка не на настоящей зоне (React.memo)."""
+def _skill_token(text: str, m: re.Match[str]) -> bool:
+    """Доменоподобный токен — навык справочника целиком: Socket.io, ASP.NET, «Mail.ru Cloud».
+    Файлы (main.py) и члены классов (React.memo) не исключаем: от домена их не отличить."""
     token = m.group().split("/")[0]
     tail = re.match(r"\s+\w+", text[m.end() :])
-    if canonical(token) is not None or bool(tail and canonical(token + tail.group())):
-        return True
-    labels = token.lower().split(".")
-    if labels[-1] in _CODE_EXT:
-        return True
-    return len(labels) == 2 and labels[1] not in _ZONES and canonical(labels[0]) is not None
+    return canonical(token) is not None or bool(tail and canonical(token + tail.group()))
 
 
 def _at_allowed(token: str) -> bool:
@@ -299,13 +303,15 @@ def _long_number(run: str) -> bool:
 
 
 def _mask_line(
-    text: str, known: list[set[str]], head: bool = False
+    text: str, known: list[set[str]], head: bool = False, raw: re.Pattern[str] | None = None
 ) -> tuple[str, list[tuple[str, str]]]:
     hits: list[tuple[str, str]] = []
 
     def sub(kind: str, pattern: re.Pattern[str], s: str) -> str:
         def rep(m: re.Match[str]) -> str:
-            if pattern is _SITE and _site_kept(s, m) or pattern is _NICK and _at_allowed(m.group()):
+            if pattern in (_SITE, _ROUGH_DOMAIN) and _skill_token(s, m):
+                return m.group()
+            if pattern is _NICK and _at_allowed(m.group()):
                 return m.group()
             if pattern is _DIGIT_RUN and not _long_number(m.group()):
                 return m.group()
@@ -329,6 +335,9 @@ def _mask_line(
         text = sub("возраст", _AGE_NEAR, text)
     # всё, что ловит грубая проверка цифр, закрываем: иначе ложная ошибка обезличивания
     text = sub("номер", _DIGIT_RUN, text)
+    text = sub("ссылка", _ROUGH_DOMAIN, text)
+    if raw is not None:
+        text = sub("ФИО", raw, text)
     for start, end, _ in reversed(_name_tokens(text, known, head)):
         hits.append(("ФИО", text[start:end]))
         text = f"{text[:start]}[ФИО]{text[end:]}"
@@ -375,12 +384,13 @@ def mask(doc: Document, filename: str | None = None, *, names_from_file: bool = 
     Вакансии маскируем без слов из имени (names_from_file=False): там название, а не ФИО."""
     words = _filename_words(filename or doc.name) if names_from_file else []
     known = [_lemmas(w) for w in words]
+    raw = _raw_words(words)
     lines, table = [], []
     for line, head in zip(doc.lines, _heads(doc.lines), strict=True):
-        text, hits = _mask_line(line.text, known, head)
+        text, hits = _mask_line(line.text, known, head, raw)
         lines.append(line.model_copy(update={"text": text}))
         table += [(line.n, kind, value) for kind, value in hits]
-    warnings = [_mask_line(w, known)[0] for w in doc.warnings]
+    warnings = [_mask_line(w, known, raw=raw)[0] for w in doc.warnings]
     hashes = sorted({contact_hash(v) for _, k, v in table if k in ("телефон", "почта")})
     update = {"lines": lines, "warnings": warnings, "name": _neutral_name(lines)}
     return Masked(
@@ -388,6 +398,7 @@ def mask(doc: Document, filename: str | None = None, *, names_from_file: bool = 
         replacements=table,
         contact_hashes=hashes,
         found=dict(Counter(kind for _, kind, _ in table)),
+        name_words=words,
     )
 
 
@@ -408,7 +419,7 @@ def _rough_hits(text: str, head: bool = False) -> list[str]:
     # одиночный «@» перед числом или в конце строки («Сбер @ 2020») — не утечка
     rest = _NICK.sub(lambda m: "" if _at_allowed(m.group()) else m.group(), _MASK.sub("", text))
     hits += ["@"] * len(_AT_LEAK.findall(rest))
-    hits += ["домен" for m in _SITE.finditer(text) if not _site_kept(text, m)]
+    hits += ["домен" for m in _ROUGH_DOMAIN.finditer(text) if not _skill_token(text, m)]
     hits += ["ник"] * len(_NICK_LABEL.findall(text))
     # ФИО без NER: отчество, пара «имя + фамилия» в любом регистре, латиница в шапке
     hits += ["ФИО"] * len(_pair_spans(text, head))
@@ -420,6 +431,7 @@ def assert_clean(masked: Masked) -> None:
     нашлось — PrivacyError."""
     known = [_lemmas(v) for _, kind, v in masked.replacements if kind == "ФИО"]
     known += [_lemmas(w) for w in _filename_words(masked.doc.name)]
+    raw = _raw_words(masked.name_words)
     left: Counter[str] = Counter()
     lines = masked.doc.lines
     texts = [(masked.doc.name, False), *((w, False) for w in masked.doc.warnings)]
@@ -428,6 +440,8 @@ def assert_clean(masked: Masked) -> None:
         _, hits = _mask_line(text, known, head)
         left.update(kind for kind, _ in hits)
         left.update(_rough_hits(text, head))
+        # сырые латинские слова имени файла — без опоры на маску и транслит
+        left.update("ФИО" for _ in (raw.finditer(text) if raw else ()))
     if left:
         # в сообщении только типы и число, без самих значений
         raise PrivacyError(f"после маски остались данные: {dict(left)}")
