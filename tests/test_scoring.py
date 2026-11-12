@@ -124,3 +124,39 @@ def test_close_pairs_diff_4_marked_5_not() -> None:
     assert [p.id for p in r.places] == ["a", "b", "c", "d"]
     assert [p.place for p in r.places] == [1, 2, 3, 4]
     assert r.close_pairs == [("a", "b")]  # b–c разница 5, c–d с блокером
+
+
+def test_blocker_caps_verdict_at_partial() -> None:
+    assert _with_score(80, blocker=True).verdict == Verdict.PARTIAL
+    assert _with_score(30, blocker=True).verdict == Verdict.NO_FIT
+
+
+def test_no_weight_is_no_data_and_skipped_in_none_fit() -> None:
+    for s in (_score(), _score((C, NO), (C, F))):
+        assert s.verdict == Verdict.NO_DATA
+    r = rank_vacancies({"empty": _score(), "low": _with_score(30), "low2": _with_score(20)})
+    assert r.none_fit
+    assert r.places[-1].id == "empty" and r.places[-1].score.verdict == Verdict.NO_DATA
+    assert not rank_vacancies({"empty": _score()}).none_fit
+    assert rank_candidates({"a": _score(), "b": _score((C, F))}).close_pairs == []
+
+
+def test_redirect_never_to_no_fit_or_blocked() -> None:
+    r = rank_vacancies({"best": _with_score(40), "mine": _with_score(20)}, applied="mine")
+    assert r.redirect is None  # лучшая «не подходит»
+    blocked_best = {"best": _with_score(90, True), "mine": _with_score(50)}
+    assert rank_vacancies(blocked_best, applied="mine").redirect is None
+    no_data = {"empty": _score(), "mine": _with_score(20)}
+    assert rank_vacancies(no_data, applied="mine").redirect is None
+    assert rank_vacancies({"a": _with_score(80), "mine": _score()}, applied="mine").redirect is None
+
+
+def test_redirect_from_blocked_to_clean_regardless_of_gap() -> None:
+    scores = {"clean": _with_score(60), "mine": _with_score(80, True)}
+    r = rank_vacancies(scores, applied="mine")
+    assert r.redirect is not None
+    assert (r.redirect.from_vacancy, r.redirect.to_vacancy) == ("mine", "clean")
+    assert r.redirect.reasons[-1].blocker
+    # чистая лучшая перескакивает «не подходит» и заблокированные выше по баллу
+    scores |= {"bad": _with_score(30), "blocked": _with_score(95, True)}
+    assert rank_vacancies(scores, applied="mine").redirect.to_vacancy == "clean"  # type: ignore[union-attr]
