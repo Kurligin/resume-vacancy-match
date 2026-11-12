@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from rvm.llm import LLMClient
 from rvm.models import Document, ReqKind, Requirement, Section
 
-PROMPT_VERSION = "extract_vacancy.v1"
+PROMPT_VERSION = "extract_vacancy.v2"
 PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 
 # Начала заголовков, регистронезависимо, «ё» как «е». Порядок важен: длинное раньше короткого.

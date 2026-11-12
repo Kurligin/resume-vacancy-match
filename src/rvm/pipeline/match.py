@@ -14,12 +14,12 @@ from rvm.models import Document, Evidence, MatchRow, ReqKind, Requirement, Statu
 from rvm.pipeline.verify import check, normalize
 from rvm.refs.skills import hints, mentioned
 
-PROMPT_VERSION = "match.v1"
+PROMPT_VERSION = "match.v2"
 PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 SELF_BLOCKS = {"Обо мне"}
 # признаки отрицания: «нет» модели без них — не «нет»
 NEGATION = re.compile(
-    r"(?<!\w)(?:не|нет|без|ни|никогда|незнаком\w*|отсутств\w*|not|no|never|without"
+    r"(?<!\w)(?:не|нет|без|ни|никогда|только|незнаком\w*|отсутств\w*|not|no|never|without"
     r"|готов\w* (?:освоить|изучить|научиться))(?!\w)|n't",
     re.IGNORECASE,
 )
