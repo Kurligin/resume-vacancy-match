@@ -353,3 +353,34 @@ mark{background:none;color:inherit}
 a{color:inherit;text-decoration:none}
 label.drop{display:block;cursor:pointer}
 .btn:disabled{opacity:.45;cursor:default}
+
+/* Вход */
+.login{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% -10%,#e8f1fc 0%,var(--bg) 60%)}
+.lg{width:min(400px,calc(100vw - 32px));text-align:center}
+.lg .mark{width:56px;height:56px;border-radius:16px;margin:0 auto 14px}
+.lg .mark .i{width:30px;height:30px}
+.lg h1{font-size:28px;letter-spacing:-.02em}
+.lg .tag{color:var(--fg2);margin:4px 0 22px}
+.lgc{padding:18px;text-align:left}
+.lgc .fld{grid-template-columns:70px 1fr}
+.lgc .btn{width:100%;justify-content:center;height:40px;margin-top:14px;font-size:14px}
+.demo-h{font-size:12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;margin:22px 0 8px;text-align:left}
+.role{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:8px;transition:box-shadow .2s,transform .1s ease-out}
+.role:hover{box-shadow:0 0 0 2px var(--accent)}
+.role:active{transform:scale(.99)}
+.role .avatar{width:40px;height:40px}
+.role .avatar .i{width:20px;height:20px}
+.role small{display:block;color:var(--fg2);font-size:12px}
+.role .go{margin-left:auto;color:var(--accent)}
+.login[hidden]{display:none}
+.avatar.green{background:linear-gradient(145deg,#34c759,#1f7a3a)}
+.lgerr{color:var(--no);font-size:13px;min-height:0}
+.lgerr:not(:empty){margin-top:10px}
+[hidden]{display:none!important}
+.tl .who{color:var(--fg3)}
+.me{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2);margin-left:6px}
+.me .avatar{width:28px;height:28px}
+.me .avatar .i{width:15px;height:15px}
+.me button{color:var(--accent);font-size:13px}
+.mnote{flex:1 0 100%;box-sizing:border-box;font:inherit;font-size:14px;min-height:64px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;resize:vertical}
+.spot>.i{width:24px;height:24px;flex:none}

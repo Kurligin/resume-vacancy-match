@@ -1,7 +1,7 @@
 """Заполнить базу для показа интерфейса без ключа: вакансии и резюме через API с фейковой
 моделью (rvm.llm.fake.DemoFake). Сеть не используется.
 
-    RVM_HASH_SALT=... RVM_DB=/tmp/rvm/rvm.sqlite uv run python scripts/seed_dev.py \\
+    RVM_HASH_SALT=... RVM_DEMO_LOGIN=1 RVM_DB=/tmp/rvm/rvm.sqlite uv run python scripts/seed_dev.py \\
         --vacancy вакансия.docx --resume резюме1.docx резюме2.docx
 
 Без --vacancy/--resume берёт файлы из RVM_DATA_DIR: в имени «ваканс» — вакансия."""
@@ -31,7 +31,11 @@ def main() -> None:
     llm = LLMClient(
         DemoFake(), base_url="https://fake.invalid", model="demo", cache_path=db.parent / "seed.c"
     )
-    with TestClient(create_app(db=db, llm=llm)) as api:
+    app = create_app(db=db, llm=llm)
+    with TestClient(app, base_url="http://localhost", headers={"X-Requested-With": "seed"}) as api:
+        r = api.post("/api/login", json={"role": "recruiter"})
+        if r.status_code != 200:
+            raise SystemExit(f"вход не удался ({r.status_code}): нужен RVM_DEMO_LOGIN=1")
         for p in args.vacancy:
             r = api.post("/api/vacancies", files={"file": (p.name, p.read_bytes())})
             print("вакансия:", p.name, r.status_code)

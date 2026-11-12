@@ -1,4 +1,4 @@
-// Интерфейс рекрутера: «Кандидаты», разбор кандидата, загрузка. Данные — из /api, без сборки.
+// Интерфейс: вход, «Разбор», «Кандидаты», разбор кандидата, пакет для заказчика, загрузка. Данные — из /api, без сборки.
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) =>
@@ -24,11 +24,15 @@ const PS = {
   invited: ["приглашён", "p-inv"],
   reserve: ["в резерве", "p-res"],
   rejected: ["отказ", "p-rej"],
+  cust_rejected: ["отказ заказчика", "p-rej"],
 };
 const FILTERS = [
   ["all", "Все"], ["new", "Новые"], ["review", "На рассмотрении"], ["cust", "У заказчика"],
-  ["alt", "Другая вакансия"], ["invited", "Приглашены"], ["reserve", "Резерв"], ["rejected", "Отказ"],
+  ["alt", "Другая вакансия"], ["invited", "Приглашены"], ["reserve", "Резерв"], ["rejected", "Отказ"], ["cust_rejected", "Отказ заказчика"],
 ];
+const ACT = [null, ["Заказчику", "send", "отправить на рассмотрение"], ["Другая вакансия", "arrow", "предложить кандидату"], ["В резерв", "archive", "вернуться при новой вакансии"], ["Отказ", "x", "с причинами по делу"]];
+const DEC2ST = { 1: "cust", 2: "alt", 3: "reserve", 4: "rejected" };
+const BK = { need: "Нужно ваше решение", fit: "Явно подходят", nofit: "Явно не подходят", done: "Разобрано" };
 const ST = { full: ["полное", "check"], partial: ["частично", "half"], no: ["нет", "x"], unknown: ["не указано", "help"] };
 const SECTION = {
   must: "Обязательные", nice: "Желательные", inferred: "Из обязанностей",
@@ -43,12 +47,15 @@ const FLAG = {
 };
 const POLL_MS = 1500;
 
-const st = { pii: false, flt: "all", q: "", tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
+const st = { me: null, bk: "need", ti: 0, packNames: false, pii: false, flt: "all", q: "", tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
 let view = {}; // данные текущего экрана
 let poll = null;
 
+const mgr = () => st.me?.role === "manager";
+
 async function api(path, opt = {}) {
-  const r = await fetch(path, opt);
+  const r = await fetch(path, { ...opt, headers: { "X-Requested-With": "fetch", ...opt.headers } });
+  if (r.status === 401 && path !== "/api/login") showLogin();
   if (!r.ok) {
     let msg = "";
     try {
@@ -59,13 +66,16 @@ async function api(path, opt = {}) {
     }
     throw new Error(msg || `сервер ответил ${r.status}`);
   }
-  return r.status === 204 ? null : r.json();
+  return opt.raw ? r : r.status === 204 ? null : r.json();
 }
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
 const stateBox = (kind, text) =>
   `<div class="card state ${kind === "err" ? "err" : ""}">${ic(kind === "err" ? "alert" : kind === "empty" ? "inbox" : "clock")}${esc(text)}</div>`;
 const failed = (e) => stateBox("err", `Не удалось загрузить данные: ${e.message}. Обновите страницу.`);
-const cname = (id) => `Кандидат ${id}`;
+const names = {}; // ФИО из ответов API — только при включённом переключателе
+const cname = (id) => (st.pii && names[id]) || `Кандидат ${id}`;
+const remember = (list) => list.forEach((c) => c.name && (names[c.id] = c.name));
 const plural = (n, one, few, many) =>
   n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many;
 const piiTog = () =>
@@ -96,7 +106,9 @@ const go = (hash) => {
 };
 
 async function render(scroll = false) {
+  if (!st.me) return;
   const r = route();
+  if (mgr() && (r.name === "triage" || r.name === "vacancies")) return go("#/candidates");
   for (const a of document.querySelectorAll(".nav a")) {
     const on = a.dataset.sec === (r.name === "cand" || r.name === "base" ? "candidates" : r.name);
     if (on) a.setAttribute("aria-current", "page");
@@ -104,10 +116,13 @@ async function render(scroll = false) {
   }
   $("#summary").hidden = $("#detail").hidden = r.name !== "cand";
   if (scroll) window.scrollTo({ top: 0 });
-  if (r.name === "triage" || r.name === "vacancies") {
+  if (r.name === "triage") {
     stopPoll();
-    const t = r.name === "triage" ? "Разбор откликов" : "Вакансии";
-    $("#top").innerHTML = `<div class="head"><span class="avatar blue">${ic(r.name === "triage" ? "inbox" : "brief")}</span><div class="who"><h1>${t}</h1></div></div>${stateBox("empty", "Раздел появится в следующей версии.")}`;
+    return renderTriage();
+  }
+  if (r.name === "vacancies") {
+    stopPoll();
+    $("#top").innerHTML = `<div class="head"><span class="avatar blue">${ic("brief")}</span><div class="who"><h1>Вакансии</h1></div></div>${stateBox("empty", "Раздел появится в следующей версии.")}`;
     $("#doc").innerHTML = "";
     return;
   }
@@ -120,9 +135,14 @@ async function render(scroll = false) {
 async function renderBase(r) {
   if (!view.base) $("#top").innerHTML = stateBox("load", "Загружаем кандидатов…");
   try {
-    const q = st.q ? `?q=${encodeURIComponent(st.q)}` : "";
-    const [list, vacs] = await Promise.all([api(`/api/candidates${q}`), api("/api/vacancies")]);
-    view.base = { list, vacs };
+    const q = `?pii=${st.pii}${st.q ? `&q=${encodeURIComponent(st.q)}` : ""}`;
+    const [list, vacs, stats] = await Promise.all([
+      api(`/api/candidates${q}`),
+      api("/api/vacancies"),
+      mgr() ? null : api("/api/stats"),
+    ]);
+    remember(list);
+    view.base = { list, vacs, stats };
   } catch (e) {
     $("#top").innerHTML = failed(e);
     return;
@@ -133,40 +153,44 @@ async function renderBase(r) {
   const sel = r.id ?? view.base.list[0]?.id;
   if (sel != null) renderCard(sel);
   else $("#doc").innerHTML = `<div class="stub" style="padding:18px">${ic("users")}Загрузите резюме — карточка кандидата появится здесь.</div>`;
-  $("#navbadge").textContent = view.base.list.filter((c) => c.status === "new").length || "";
+  $("#navbadge").textContent = mgr() ? view.base.list.length || "" : view.base.stats.waiting || "";
 }
 
 function topBase() {
-  const { list, vacs } = view.base;
+  const { list, vacs, stats } = view.base;
+  if (mgr()) st.flt = "cust";
   const n = (f) => list.filter((c) => f === "all" || c.status === f).length;
   const week = list.filter((c) => Date.now() - new Date(c.created_at) < 7 * 864e5).length;
   const open = vacs.filter((v) => v.is_open).length;
   const sel = route().id ?? list[0]?.id;
   let h = `<div class="head"><span class="avatar blue">${ic("db")}</span><div class="who"><h1>Кандидаты</h1>
-    <div class="sub"><span>${ic("users", "i-sm")}${list.length} в базе</span><span>${ic("brief", "i-sm")}${open} ${plural(open, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span></div></div></div>
-   <div class="stats">
-    <div class="card stat warn"><div class="k">${ic("bell", "i-sm")}Новые</div><div class="v num">${n("new")}</div></div>
-    <div class="card stat"><div class="k">${ic("clock", "i-sm")}На рассмотрении</div><div class="v num">${n("review")}</div></div>
+    <div class="sub"><span>${ic("users", "i-sm")}${mgr() ? `${list.length} у вас на рассмотрении` : `${list.length} в базе`}</span><span>${ic("brief", "i-sm")}${open} ${plural(open, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span></div></div>${mgr() ? "" : `<div class="side">${piiTog()}</div>`}</div>`;
+  if (!mgr()) {
+    const avg = stats.avg_reply_days;
+    h += `<div class="stats">
+    <div class="card stat warn"><div class="k">${ic("bell", "i-sm")}Ждут ответа</div><div class="v num">${stats.waiting}</div></div>
+    <div class="card stat"><div class="k">${ic("clock", "i-sm")}Среднее время ответа</div><div class="v num">${avg == null ? "–" : `${avg} дн.`}</div></div>
     <div class="card stat"><div class="k">${ic("archive", "i-sm")}В резерве</div><div class="v num">${n("reserve")}</div></div>
-    <div class="card stat"><div class="k">${ic("inbox", "i-sm")}Загружено за неделю</div><div class="v num">${week}</div></div></div>
+    <div class="card stat"><div class="k">${ic("inbox", "i-sm")}Новых за неделю</div><div class="v num">${week}</div></div></div>
    <div id="queue"></div>`;
-  for (const v of vacs.filter((x) => x.reserve_matches.length)) {
+  }
+  for (const v of mgr() ? [] : vacs.filter((x) => x.reserve_matches.length)) {
     const m = v.reserve_matches.length;
     h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>Новая вакансия «${esc(v.title)}»: в резерве ${plural(m, "нашёлся", "нашлись", "нашлись")} ${m} ${plural(m, "подходящий", "подходящих", "подходящих")}.</b> ${v.reserve_matches.map(cname).join(", ")}.</div><a class="btn btn-white" href="#/candidates/${v.reserve_matches[0]}">Показать</a></div>`;
   }
   const rows = list.filter((c) => st.flt === "all" || c.status === st.flt);
   h += `<div class="card rank"><div class="tools"><label class="search">${ic("search", "i-sm")}<input id="q" type="search" value="${esc(st.q)}" placeholder="Навык, должность…" aria-label="Поиск"></label><div class="chips">
-    ${FILTERS.map(([k, t]) => `<button class="chip" aria-pressed="${st.flt === k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join("")}</div></div>`;
+    ${FILTERS.filter(([k]) => !mgr() || k === "cust").map(([k, t]) => `<button class="chip" aria-pressed="${st.flt === k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join("")}</div></div>`;
   if (!rows.length)
     h += `<div class="stub" style="padding:18px">${ic("search")}${list.length || st.q ? "Никого не нашлось — измените поиск или фильтр." : "В базе пока пусто. Нажмите «Загрузить»."}</div>`;
   h += rows
     .map(
       (c) => `<button class="crow" aria-selected="${c.id === sel}" data-href="#/candidates/${c.id}">
      <span class="tile round">${ic("user")}</span>
-     <span><div class="t" style="font-weight:600">${cname(c.id)}</div><div class="meta"><span>${ic("cal", "i-sm")}${day(c.created_at)}</span><span>${esc(c.source)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
-     <span class="best"><b class="num">${num(c.best_score)}</b><span>лучший балл</span></span>
-     <span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span></span>
-     <span class="reply btn btn-ghost" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</span></button>`,
+     <span><div class="t" style="font-weight:600">${esc(cname(c.id))}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(c.created_at)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
+     <span class="best"><b class="num">${num(c.best_vacancy_score ?? c.best_score)}</b><span>${esc(c.best_title ?? "лучший балл")}</span></span>
+     <span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>${!mgr() && c.waiting && c.waiting_days ? `<div class="wait">${ic("bell", "i-sm")}ждёт ${c.waiting_days} дн.</div>` : ""}</span>
+     ${mgr() ? "<span></span>" : `<span class="reply btn btn-ghost" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</span>`}</button>`,
     )
     .join("");
   return h + "</div>";
@@ -178,7 +202,10 @@ const EVENT = {
   merged: (d) => `Объединён с карточкой ${cname(d.from)}`,
   not_duplicate: () => "Отмечено: не дубль",
   evaluated: (d, t) => `Оценка по «${t}»: ${num(d.score)}`,
-  status: (d) => `Статус: ${PS[d.to]?.[0] ?? d.to}`,
+  status: (d) =>
+    `${d.decision === "invite" ? "Решение: пригласить на интервью" : d.decision === "reject" ? "Решение: не подходит" : d.package ? "Отправлен заказчику в пакете" : typeof d.decision === "number" ? `Решение в разборе: ${ACT[d.decision][0].toLowerCase()}` : `Статус: ${PS[d.to]?.[0] ?? d.to}`}${d.comment ? ` · «${d.comment}»` : ""}`,
+  reply_sent: () => "Отмечено: ответ отправлен",
+  spot_check: (d) => `Выборочная проверка: ${d.agree ? "согласен с отказом" : "не согласен — на решение"}`,
   clarified: (d) => `Уточнено: ${d.check}`,
   answer: (d, t) => `Ответ по ${d.requirement} («${t}»): ${ST[d.answer]?.[0] ?? d.answer} · балл ${num(d.before)} → ${num(d.after)}`,
   deleted: () => "Удалён",
@@ -187,7 +214,8 @@ const EVENT = {
 async function renderCard(id) {
   let c;
   try {
-    c = await api(`/api/candidates/${id}`);
+    c = await api(`/api/candidates/${id}?pii=${st.pii}`);
+    remember([c]);
   } catch (e) {
     $("#doc").innerHTML = `<div class="state err">${ic("alert")}${esc(e.message)}</div>`;
     return;
@@ -197,12 +225,17 @@ async function renderCard(id) {
   const ev = [...c.evaluations].sort((a, b) => b.score - a.score);
   const best = [...c.evaluations].sort((a, b) => (a.place ?? 99) - (b.place ?? 99))[0];
   const hist = c.events.filter((e) => EVENT[e.type]);
-  $("#doc").innerHTML = `<div class="ccard"><div class="ch1"><span class="avatar">${ic("user")}</span><div><h2>${cname(c.id)}</h2><div class="sub" style="margin-top:2px"><span>${c.versions.length} ${plural(c.versions.length, "версия", "версии", "версий")} резюме · с ${day(c.created_at)}</span></div></div></div>
-   <div class="sec">Статус</div><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>
+  const dup = c.possible_duplicate_of;
+  const acts = mgr()
+    ? `<textarea class="mnote" id="mgrnote" aria-label="Комментарий рекрутеру" placeholder="Комментарий рекрутеру"></textarea>${best ? `<a class="btn btn-ghost" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(best.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор</a>` : ""}<button class="btn btn-primary" data-mdec="invite">${ic("check", "i-sm")}Пригласить на интервью</button><button class="btn btn-danger" data-mdec="reject">${ic("x", "i-sm")}Не подходит</button>`
+    : `${best ? `<a class="btn btn-ghost" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(best.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор</a>` : ""}<button class="btn btn-primary" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</button>
+    ${c.status !== "reserve" ? `<button class="btn btn-ghost" data-confirm="reserve">${ic("archive", "i-sm")}В резерв</button>` : ""}<button class="btn btn-danger" data-confirm="delete">${ic("trash", "i-sm")}Удалить</button>`;
+  $("#doc").innerHTML = `<div class="ccard"><div class="ch1"><span class="avatar">${ic("user")}</span><div><h2>${esc(cname(c.id))}</h2><div class="sub" style="margin-top:2px">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${c.versions.length} ${plural(c.versions.length, "версия", "версии", "версий")} резюме · с ${day(c.created_at)}</span></div></div></div>
+   ${dup && !mgr() ? `<div class="callout"><span class="ico">${ic("users")}</span><div><b>Возможный повтор:</b> похож на ${esc(cname(dup))}.</div><button class="btn btn-white" data-merge="${dup}">Объединить</button><button class="btn btn-white" data-notdup>Разные люди</button></div>` : ""}
+   <div class="sec">Статус</div><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>${!mgr() && c.replied_at ? ` <span class="done-chip">${ic("check", "i-sm")}Отмечено: отправлен ${day(c.replied_at)}</span>` : !mgr() && c.waiting_days ? ` <span class="wait">${ic("bell", "i-sm")}ждёт ответа ${c.waiting_days} дн.</span>` : ""}
    <div class="sec">Оценки по вакансиям</div>${ev.length ? ev.map((e) => { const v = VERDICT[e.verdict]; return `<a class="ev" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(e.vacancy_id)}">${ic(v[3], v[4])}<span>${esc(e.title ?? e.vacancy_id)}</span><span class="n num">${num(e.score)}</span></a>`; }).join("") : `<div class="stub">${ic("clock")}Оценок пока нет.</div>`}
-   <div class="sec">История</div><div class="tl">${hist.map((e) => `<div class="tli ${e.who !== "система" ? "acc" : ""}"><time class="num">${stamp(e.at)}</time>${esc(EVENT[e.type](e.details, title(e.vacancy_id)))}</div>`).join("")}</div>
-   <div class="cactions">${best ? `<a class="btn btn-ghost" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(best.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор</a>` : ""}<button class="btn btn-primary" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</button>
-    ${c.status !== "reserve" ? `<button class="btn btn-ghost" data-confirm="reserve">${ic("archive", "i-sm")}В резерв</button>` : ""}<button class="btn btn-danger" data-confirm="delete">${ic("trash", "i-sm")}Удалить</button></div></div>`;
+   <div class="sec">История</div><div class="tl">${hist.map((e) => `<div class="tli ${e.who !== "система" ? "acc" : ""}"><time class="num">${stamp(e.at)}</time>${esc(EVENT[e.type](e.details, title(e.vacancy_id)))}${e.who !== "система" ? ` <span class="who">· ${esc(e.who)}</span>` : ""}</div>`).join("")}</div>
+   <div class="cactions">${acts}</div></div>`;
 }
 
 /* ---------- прогресс пачки ---------- */
@@ -260,7 +293,8 @@ async function renderCand(r) {
     $("#summary").hidden = $("#detail").hidden = true;
     $("#doc").innerHTML = "";
     try {
-      const [card, report] = await Promise.all([api(`/api/candidates/${r.id}`), api(`/api/evaluations?candidate=${r.id}`)]);
+      const [card, report] = await Promise.all([api(`/api/candidates/${r.id}?pii=${st.pii}`), api(`/api/evaluations?candidate=${r.id}`)]);
+      remember([card]);
       view.cand = { id: r.id, card, report };
     } catch (e) {
       $("#top").innerHTML = failed(e);
@@ -293,9 +327,9 @@ function topCand(vac) {
   const back = st.from && !st.from.startsWith(`#/candidates/${id}/vacancy`) ? st.from : `#/candidates/${id}`;
   const backLabel = back.startsWith("#/triage") ? "Разбор откликов" : back.startsWith("#/vacancies") ? "Вакансии" : "Кандидаты";
   const file = card.versions[0]?.name;
-  let h = `<a class="back" href="${esc(back)}">${ic("chev", "i-sm")}${backLabel}</a><div class="head"><span class="avatar">${ic("user")}</span><div class="who"><h1>${cname(id)}</h1>
+  let h = `<a class="back" href="${esc(back)}">${ic("chev", "i-sm")}${backLabel}</a><div class="head"><span class="avatar">${ic("user")}</span><div class="who"><h1>${esc(cname(id))}</h1>
     <div class="sub">${report.applied ? `<span>${ic("inbox", "i-sm")}отклик на «${esc(title(report.applied))}»${report.applied_guessed ? " · определён по письму" : ""}</span>` : ""}${st.pii && file ? `<span>${ic("file", "i-sm")}${esc(file)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(card.created_at)}</span></div></div>
-    <div class="side"><span style="display:flex;gap:8px"><a class="btn btn-ghost" href="#/candidates/${id}">${ic("hist", "i-sm")}Карточка и история</a><button class="btn btn-ghost" data-reply="${id}">${ic("send", "i-sm")}Ответить</button></span>${piiTog()}</div></div>`;
+    <div class="side"><span style="display:flex;gap:8px"><a class="btn btn-ghost" href="#/candidates/${id}">${ic("hist", "i-sm")}Карточка и история</a>${mgr() ? "" : `<button class="btn btn-ghost" data-reply="${id}">${ic("send", "i-sm")}Ответить</button>${vac ? `<button class="btn btn-ghost" data-pack="${esc(vac.id)}" data-ids="${id}">${ic("send", "i-sm")}Для заказчика</button>` : ""}`}</span>${mgr() ? "" : piiTog()}</div></div>`;
   if (!vac) return h;
   const rd = report.redirect;
   if (rd) {
@@ -350,6 +384,7 @@ function renderPane() {
   const rowOf = (rid) => v.rows.find((x) => x.requirement_id === rid);
   const reqOf = (rid) => v.requirements.find((x) => x.id === rid);
   $("#qcnt").textContent = qs.length;
+  if (mgr() && st.tab === "mail") st.tab = "req";
   for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === st.tab);
   let h = "";
   if (st.tab === "req") {
@@ -378,7 +413,7 @@ function renderPane() {
             const req = reqOf(q.requirement_id);
             const row = rowOf(q.requirement_id);
             const done = row?.flags.includes(FROM_CANDIDATE);
-            return `<li>${ic("chat", "c-acc")}<span style="flex:1">${esc(q.text)}${req ? `<div class="qa"><div class="seg">${ANSWERS.map(([val, l]) => `<button aria-pressed="${done && row.status === val}" data-ans="${val}" data-q="${i}">${l}</button>`).join("")}</div><span class="eff">${done ? `→ «${esc(req.text)}»: <b>${ST[row.status][0]}</b> · ${FROM_CANDIDATE}` : `влияет на «${esc(req.text)}»`}</span><input placeholder="заметка рекрутера" aria-label="Заметка" data-note="${i}" value="${esc(done ? row.note : "")}"></div>` : ""}</span></li>`;
+            return `<li>${ic("chat", "c-acc")}<span style="flex:1">${esc(q.text)}${req && !mgr() ? `<div class="qa"><div class="seg">${ANSWERS.map(([val, l]) => `<button aria-pressed="${done && row.status === val}" data-ans="${val}" data-q="${i}">${l}</button>`).join("")}</div><span class="eff">${done ? `→ «${esc(req.text)}»: <b>${ST[row.status][0]}</b> · ${FROM_CANDIDATE}` : `влияет на «${esc(req.text)}»`}</span><input placeholder="заметка рекрутера" aria-label="Заметка" data-note="${i}" value="${esc(done ? row.note : "")}"></div>` : ""}</span></li>`;
           })
           .join("")}</ul>`
       : `<div class="stub">${ic("check")}Вопросов нет: по резюме всё ясно.</div>`;
@@ -398,10 +433,11 @@ function renderPane() {
 
 const MASK_RE = /\[([^\[\]]{2,24})\]/g;
 
-function renderDoc() {
-  const r = view.cand.report.resume;
+const renderDoc = () => ($("#doc").innerHTML = docHtml(view.cand.id, view.cand.report.resume));
+
+function docHtml(id, r) {
   const lines = st.pii ? r.original : r.lines;
-  let h = `<h2>${ic("file")}${cname(view.cand.id)} · ${st.pii ? "исходный текст" : "текст, который видела модель"}</h2>`;
+  let h = `<h2>${ic("file")}${esc(cname(id))} · ${st.pii ? "исходный текст" : "текст, который видела модель"}</h2>`;
   let blk = null;
   for (const ln of lines) {
     let tx = esc(ln.text);
@@ -410,7 +446,7 @@ function renderDoc() {
     blk = ln.block;
     h += `<div class="ln" id="L${ln.n}"><span>${ln.n}</span><span>${tx}</span></div>`;
   }
-  $("#doc").innerHTML = h;
+  return h;
 }
 
 function highlight(ev) {
@@ -450,6 +486,214 @@ async function answer(i, val) {
   }
 }
 
+/* ---------- «Разбор» ---------- */
+
+const UNDECIDED = ["new", "review"];
+const whyShort = (a) => (a.length > 1 ? `${a[0]} и ещё ${a.length - 1}` : a[0] ?? "");
+
+async function renderTriage() {
+  if (!view.tri) $("#top").innerHTML = stateBox("load", "Собираем отклики…");
+  try {
+    const [t, list] = await Promise.all([api("/api/triage"), api(`/api/candidates?sort=date&pii=${st.pii}`)]);
+    remember(list);
+    view.tri = { t, list, prev: Object.fromEntries(list.map((c) => [c.id, c.status])) };
+  } catch (e) {
+    $("#top").innerHTML = failed(e);
+    return;
+  }
+  drawTriage();
+}
+
+function drawTriage() {
+  const { t, list } = view.tri;
+  const done = list.filter((c) => !UNDECIDED.includes(c.status));
+  const left = t.need.length + t.fit.length + t.nofit.length;
+  const all = left + done.length + t.pending;
+  const cnt = { need: t.need.length, fit: t.fit.length, nofit: t.nofit.length, done: done.length };
+  $("#trbadge").textContent = left || "";
+  let h = `<div class="head"><span class="avatar blue">${ic("inbox")}</span><div class="who"><h1>Разбор откликов</h1>
+    <div class="sub"><span>${ic("users", "i-sm")}${all} ${plural(all, "отклик", "отклика", "откликов")}</span><span>${ic("check", "i-sm")}разобрано ${done.length} из ${all}</span>${t.pending ? `<span>${ic("clock", "i-sm")}ещё оцениваются: ${t.pending}</span>` : ""}</div></div>
+    <div class="side">${piiTog()}</div></div>
+   <div><div class="buckets">${Object.keys(BK).map((b) => `<button class="bk" aria-pressed="${st.bk === b}" data-bk="${b}">${BK[b]} <span class="num">${cnt[b]}</span></button>`).join("")}</div>
+   <div class="prog"><i style="width:${all ? (done.length / all) * 100 : 0}%"></i></div></div>`;
+  view.tc = null;
+  if (st.bk === "need") h += needCard(t.need);
+  else if (st.bk === "done")
+    h += `<div class="card rank">${
+      done
+        .map(
+          (c) =>
+            `<div class="trow" role="button" tabindex="0" data-href="#/candidates/${c.id}" style="cursor:pointer" title="Открыть карточку в «Кандидатах»"><span></span><span class="tile round">${ic("user")}</span><span><b>${esc(cname(c.id))}</b><div class="rs">${esc(c.best_title ?? "")}</div></span><span class="num"><b>${num(c.best_vacancy_score ?? c.best_score)}</b></span><span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span></span></div>`,
+        )
+        .join("") || `<div class="stub" style="padding:16px">${ic("help")}Пока ничего не разобрано. Начните с «Нужно ваше решение».</div>`
+    }</div>`;
+  else h += bucketList(t[st.bk], st.bk === "fit");
+  $("#top").innerHTML = h;
+  triageDoc(view.tc?.id);
+}
+
+function needCard(rows) {
+  if (!rows.length)
+    return `<div class="card tcard"><div class="stub">${ic("check", "c-full")}Все отклики, где нужно ваше решение, разобраны.<button class="btn btn-ghost" data-bk="fit" style="margin-left:auto">Явно подходят</button><button class="btn btn-ghost" data-bk="nofit">Явно не подходят</button></div></div>`;
+  st.ti = Math.max(0, Math.min(st.ti, rows.length - 1));
+  const r = (view.tc = rows[st.ti]);
+  const vv = VERDICT[r.verdict];
+  const pts = (a, icn, c) =>
+    a.length
+      ? a.map((p) => `<button class="pt"${p.lines.length ? ` data-l="${p.lines[0]}"` : ""}>${ic(icn, c)}<span>${esc(p.text)}${p.lines.length ? `<span class="ref">L${p.lines[0]}</span>` : ""}</span></button>`).join("")
+      : `<div class="stub">—</div>`;
+  return `<div class="card tcard"><div class="tc-top"><span class="avatar" style="width:44px;height:44px">${ic("user")}</span><div><h2>${esc(cname(r.id))}</h2><div class="sub" style="margin-top:2px">${r.position ? `<span>${ic("brief", "i-sm")}${esc(r.position)}</span>` : ""}</div></div>
+    <div class="tc-nav"><button data-tn="-1" aria-label="Предыдущий">${ic("chev", "i-sm")}</button><span class="num">${st.ti + 1} из ${rows.length}</span><button data-tn="1" aria-label="Следующий" style="transform:scaleX(-1)">${ic("chev", "i-sm")}</button></div></div>
+   <div class="tc-best"><span class="big num">${num(r.score)}</span><span><b>${esc(r.title)}</b><div class="lbl num">лучшая вакансия · вилка ${num(r.low)}–${num(r.high)}</div></span><span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></div>
+   <div class="why-here">${ic("flag", "i-sm")}Почему здесь: ${esc(r.why.join("; "))}</div>
+   <div class="pc"><div><div class="h3">${ic("spark", "c-full")}За</div>${pts(r.pros, "check", "c-full")}</div><div><div class="h3">${ic("alert", "c-part")}Против</div>${pts(r.cons, "alert", "c-part")}</div></div>
+   <div class="decide">${[1, 2, 3, 4].map((i) => `<button class="dbtn ${r.proposed === i ? "sug" : ""}" data-act="${i}"><b>${ic(ACT[i][1], "i-sm")}${ACT[i][0]}<kbd>${i}</kbd></b><small>${r.proposed === i ? "предлагает система" : ACT[i][2]}</small></button>`).join("")}</div>
+   <div class="actions" style="margin-top:12px"><a class="btn btn-ghost" href="#/candidates/${r.id}/vacancy/${encodeURIComponent(r.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор <kbd style="font:600 11px ui-monospace;color:var(--fg3)">Enter</kbd></a><span class="why" style="padding:0;margin-left:auto">${ic("key", "i-sm")} 1–4 — решение, ← → — листать</span></div></div>`;
+}
+
+function bucketList(all, fit) {
+  const spot = fit ? null : all.find((r) => r.spot_check);
+  const rows = all.filter((r) => r !== spot); // проверяемый — отдельно сверху, не в пачке
+  let h = spot
+    ? `<div class="spot">${ic("help", "c-acc i-lg")}<div><b>Выборочная проверка.</b> Согласны, что ${esc(cname(spot.id))} не подходит на «${esc(spot.title)}»? Причина: ${esc(whyShort(spot.why))}.<div class="lbl">Часть откликов из «явно не подходят» система показывает вам отдельно.</div></div><button class="btn btn-ghost" data-spot="${spot.id}" data-agree="">Не согласен</button><button class="btn btn-primary" data-spot="${spot.id}" data-agree="1">Согласен</button></div>`
+    : "";
+  h += `<div class="card rank">${
+    rows
+      .map(
+        (r) =>
+          `<label class="trow"><input type="checkbox" checked data-pickrow="${r.id}"><span class="tile round ${fit ? "t-ok" : "t-bad"}">${ic("user")}</span><span><b>${esc(cname(r.id))}</b><div class="rs">${ic(fit ? "check" : "x", "i-sm")} ${esc(whyShort(r.why))}</div></span><span class="num"><b>${num(r.score)}</b> <span class="lbl" style="display:inline">${num(r.low)}–${num(r.high)}</span></span><span class="rs">${esc(r.title)}</span></label>`,
+      )
+      .join("") || `<div class="stub" style="padding:16px">${ic("check", "c-full")}Пусто.</div>`
+  }`;
+  if (rows.length)
+    h += `<div class="tfoot"><span class="why" style="padding:0">${fit ? "Система предлагает отправить заказчику. Решение — ваше." : "Система предлагает отказ с причинами. Автоотказа нет — нужно ваше подтверждение."}</span>${
+      fit
+        ? `<button class="btn btn-primary" data-tpack>${ic("send", "i-sm")}Пакет для заказчика <span id="tcount">(${rows.length})</span></button>`
+        : `<button class="btn btn-ghost" data-tbatch>${ic("x", "i-sm")}Подтвердить отказ <span id="tcount">(${rows.length})</span></button>`
+    }</div>`;
+  return h + "</div>";
+}
+
+const picked = () => [...document.querySelectorAll("[data-pickrow]:checked")].map((x) => +x.dataset.pickrow);
+
+async function triageDoc(id) {
+  if (id == null) {
+    $("#doc").innerHTML = `<div class="stub" style="padding:18px">${ic("file")}Текст резюме появится здесь, когда откроете отклик в «Нужно ваше решение».</div>`;
+    return;
+  }
+  const docs = (view.docs ??= {});
+  try {
+    docs[id] ??= (await api(`/api/evaluations?candidate=${id}`)).resume;
+  } catch (e) {
+    $("#doc").innerHTML = stateBox("err", e.message);
+    return;
+  }
+  if (view.tc?.id === id) $("#doc").innerHTML = docHtml(id, docs[id]);
+}
+
+async function decide(ids, a, vid) {
+  if (!ids.length) return toast("Отметьте хотя бы одного кандидата");
+  const prev = ids.map((id) => [id, view.tri?.prev[id] ?? "new"]);
+  try {
+    await post("/api/triage/decide", { candidate_ids: ids, decision: a, vacancy_id: vid ?? null });
+  } catch (e) {
+    return toast(`Решение не сохранено: ${esc(e.message)}`);
+  }
+  const who = ids.length === 1 ? esc(cname(ids[0])) : `${ids.length} ${plural(ids.length, "кандидат", "кандидата", "кандидатов")}`;
+  toast(
+    `${who} → ${PS[DEC2ST[a]][0]}`,
+    async () => {
+      for (const [id, s] of prev) await setStatus(id, s);
+      renderTriage();
+    },
+    ["Показать в «Кандидатах»", () => go(`#/candidates/${ids[0]}`)],
+  );
+  renderTriage();
+}
+
+async function spotAnswer(id, agree) {
+  try {
+    await post("/api/triage/spot", { candidate_id: id, agree });
+  } catch (e) {
+    return toast(`Ответ не сохранён: ${esc(e.message)}`);
+  }
+  toast(agree ? `${esc(cname(id))}: отказ подтверждён проверкой` : `${esc(cname(id))} перенесён в «Нужно ваше решение»`);
+  renderTriage();
+}
+
+/* ---------- пакет для заказчика ---------- */
+
+async function openPack(vid, ids) {
+  const d = modal("pack", `<div class="sheet" role="dialog" aria-label="Пакет для заказчика" style="width:min(760px,calc(100vw - 32px))"><h3>${ic("send", "c-acc i-lg")}Пакет для заказчика</h3><div class="stub">${ic("clock")}Собираем таблицу…</div></div>`);
+  let reps;
+  try {
+    reps = await Promise.all(ids.map((id) => api(`/api/evaluations?candidate=${id}`)));
+  } catch (e) {
+    d.querySelector(".stub").outerHTML = `<div class="state err">${ic("alert")}${esc(e.message)}</div><div class="actions"><button class="btn btn-ghost" data-pclose>Закрыть</button></div>`;
+    return;
+  }
+  const items = ids.map((id, i) => ({ id, v: reps[i].vacancies.find((x) => x.id === vid) })).filter((x) => x.v);
+  const sel = new Set(items.map((x) => x.id));
+  const title = items[0]?.v.title ?? vid;
+  const musts = items[0]?.v.requirements.filter((r) => r.section === "must") ?? [];
+  const chosen = () => items.filter((x) => sel.has(x.id)).map((x) => x.id);
+  const query = () => `vacancy_id=${encodeURIComponent(vid)}&${chosen().map((i) => `candidate_ids=${i}`).join("&")}&names=${st.packNames}`;
+  const cell = (x, rid) => {
+    const s = x.v.rows.find((r) => r.requirement_id === rid)?.status ?? "unknown";
+    return `<td class="c"><span class="st s-${s}">${ic(ST[s][1])}${ST[s][0]}</span></td>`;
+  };
+  const draw = () => {
+    const ch = items.filter((x) => sel.has(x.id));
+    const dis = ch.length ? "" : "disabled";
+    d.querySelector(".sheet").innerHTML = `<h3>${ic("send", "c-acc i-lg")}Пакет для заказчика · ${esc(title)}</h3>
+     <div class="picks">${items.map((x) => `<label class="pick"><input type="checkbox" ${sel.has(x.id) ? "checked" : ""} data-ppick="${x.id}">${esc(cname(x.id))} <b class="num">${num(x.v.score.score)}</b></label>`).join("")}<label class="switch" style="margin-left:auto">ФИО в документе <button class="tog" role="switch" aria-checked="${st.packNames}" data-pnames aria-label="ФИО в документе"></button></label></div>
+     ${ch.length ? `<table class="cmp"><thead><tr><th>Обязательные требования</th>${ch.map((x) => `<th class="c">${esc(cname(x.id))}</th>`).join("")}</tr></thead><tbody>${musts.map((r) => `<tr><td>${esc(r.text)}</td>${ch.map((x) => cell(x, r.id)).join("")}</tr>`).join("")}</tbody></table>` : `<div class="stub">${ic("help")}Отметьте хотя бы одного кандидата.</div>`}
+     <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("file", "i-sm")}В документе: эта таблица, по каждому кандидату — «Кратко», риски и вопросы на собеседование. После скачивания DOCX кандидаты получат статус «у заказчика».</div>
+     <div class="actions"><button class="btn btn-ghost" data-pclose>Отмена</button><button class="btn btn-ghost" data-pmail ${dis}>${ic("copy", "i-sm")}Текст письма</button><button class="btn btn-ghost" data-ppdf ${dis}>${ic("download", "i-sm")}PDF</button><button class="btn btn-primary" data-pdocx ${dis}>${ic("download", "i-sm")}Скачать DOCX</button></div>`;
+  };
+  d.addEventListener("change", (e) => {
+    const p = e.target.closest("[data-ppick]");
+    if (!p) return;
+    if (p.checked) sel.add(+p.dataset.ppick);
+    else sel.delete(+p.dataset.ppick);
+    draw();
+  });
+  d.addEventListener("click", async (e) => {
+    const on = (s) => e.target.closest(s);
+    if (on("[data-pnames]")) {
+      st.packNames = !st.packNames;
+      draw();
+    } else if (on("[data-ppdf]")) window.open(`/api/package?${query()}&format=html`, "_blank");
+    else if (on("[data-pmail]")) {
+      const n = chosen().length;
+      const text = `Добрый день!\n\nНаправляю ${n} ${plural(n, "кандидата", "кандидатов", "кандидатов")} на вакансию «${title}». Во вложении — сравнительная таблица по обязательным требованиям, по каждому кандидату краткий разбор, риски и вопросы на собеседование.\n\nПодскажите, пожалуйста, кого пригласить на интервью — решение можно отметить в системе.`;
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Текст письма заказчику скопирован");
+      } catch {
+        toast("Не удалось скопировать текст письма");
+      }
+    } else if (on("[data-pdocx]")) {
+      const ids2 = chosen();
+      try {
+        const r = await api("/api/package", { method: "POST", raw: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vacancy_id: vid, candidate_ids: ids2, names: st.packNames }) });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(await r.blob());
+        a.download = `Пакет — ${title}.docx`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } catch (err) {
+        return toast(`Пакет не собран: ${esc(err.message)}`);
+      }
+      modal("pack", null);
+      view.base = null;
+      toast(`Пакет скачан: ${ids2.length} → у заказчика`, null, ["Показать в «Кандидатах»", () => go(`#/candidates/${ids2[0]}`)]);
+      render();
+    }
+  });
+  draw();
+}
+
 /* ---------- окна ---------- */
 
 function modal(id, html) {
@@ -481,15 +725,24 @@ async function openReply(cid) {
        <label class="fld"><span>Тема</span><input value="МФТИ: ваш отклик на «${esc(v.title)}»" aria-label="Тема"></label>
        <textarea class="ed" aria-label="Текст письма" id="replytext">${esc(cur.text)}</textarea>
        <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("shield", "c-full i-sm")}Текст собран из таблицы требований, его можно править. Смена шаблона заменит текст.</div>
-       <div class="actions"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-primary" data-copy="#replytext">${ic("copy", "i-sm")}Скопировать</button></div>`
+       <div class="actions"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-ghost" data-sent>${ic("check", "i-sm")}Отметить: отправлен</button><button class="btn btn-primary" data-copy="#replytext">${ic("copy", "i-sm")}Скопировать</button></div>`
         : `<div class="stub">${ic("help")}Для этого кандидата письма нет: нет оценок по вакансиям.</div><div class="actions"><button class="btn btn-ghost" data-close>Закрыть</button></div>`
     }`;
   };
-  d.addEventListener("click", (e) => {
+  d.addEventListener("click", async (e) => {
     const k = e.target.closest("[data-rkind]");
     if (k) {
       cur = ls.find((l) => l.kind === k.dataset.rkind);
       draw();
+    } else if (e.target.closest("[data-sent]")) {
+      try {
+        await post(`/api/candidates/${cid}/reply-sent`, { template: cur.kind, vacancy_id: v.id });
+      } catch (err) {
+        return toast(`Не отмечено: ${esc(err.message)}`);
+      }
+      modal("sheet", null);
+      toast(`${esc(cname(cid))}: отмечено — ответ отправлен`);
+      render();
     }
   });
   draw();
@@ -590,6 +843,68 @@ async function openUpload() {
   }
 }
 
+async function managerDecide(kind) {
+  const c = view.card;
+  try {
+    await post(`/api/candidates/${c.id}/manager-decision`, { decision: kind, comment: $("#mgrnote")?.value.trim() ?? "" });
+  } catch (e) {
+    return toast(`Решение не сохранено: ${esc(e.message)}`);
+  }
+  toast(`${esc(cname(c.id))}: ${kind === "invite" ? "пригласить на интервью" : "не подходит"} — рекрутер увидит решение`);
+  view.base = null;
+  go("#/candidates");
+}
+
+async function duplicate(merge) {
+  const c = view.card;
+  const keep = c.possible_duplicate_of;
+  try {
+    if (merge) await post(`/api/candidates/${keep}/merge`, { other: c.id });
+    else await post(`/api/candidates/${c.id}/dismiss-duplicate`);
+  } catch (e) {
+    return toast(`Не получилось: ${esc(e.message)}`);
+  }
+  toast(merge ? `Карточки объединены в ${esc(cname(keep))}` : "Отмечено: разные люди");
+  view.base = null;
+  go(`#/candidates/${merge ? keep : c.id}`);
+}
+
+/* ---------- вход ---------- */
+
+function showLogin() {
+  st.me = null;
+  view = {};
+  stopPoll();
+  for (const x of document.querySelectorAll(".scrim, #toast")) x.remove();
+  $("#login").hidden = false;
+  api("/api/login-options")
+    .then((o) => ($("#demo").hidden = !o.demo))
+    .catch(() => {});
+}
+
+function enter(user) {
+  st.me = user;
+  st.flt = mgr() ? "cust" : "all";
+  st.pii = false;
+  $("#login").hidden = true;
+  $("#lgerr").textContent = "";
+  $("#mename").textContent = user.name;
+  for (const el of document.querySelectorAll("[data-rec]")) el.hidden = mgr();
+  const r = route();
+  if (mgr() && !location.hash.startsWith("#/candidates")) return go("#/candidates");
+  if (!mgr() && !location.hash) return go("#/triage");
+  if (r.name !== "triage" && !mgr()) api("/api/triage").then((t) => ($("#trbadge").textContent = t.need.length + t.fit.length + t.nofit.length || "")).catch(() => {});
+  render();
+}
+
+async function login(body) {
+  try {
+    enter(await post("/api/login", body));
+  } catch (e) {
+    $("#lgerr").textContent = e.message;
+  }
+}
+
 let toastTimer;
 let toastAct = {};
 function toast(html, undo, goTo) {
@@ -623,7 +938,33 @@ document.addEventListener("click", async (e) => {
     } catch {
       toast("Не удалось скопировать — выделите текст вручную");
     }
-  } else if (on("[data-close]") || t.id === "sheet") modal("sheet", null);
+  } else if ((el = on("[data-login]"))) login({ role: el.dataset.login });
+  else if (on("#logout")) {
+    await post("/api/logout").catch(() => {});
+    showLogin();
+  } else if ((el = on("[data-bk]"))) {
+    st.bk = el.dataset.bk;
+    st.ti = 0;
+    drawTriage();
+  } else if ((el = on("[data-tn]"))) {
+    st.ti += +el.dataset.tn;
+    drawTriage();
+  } else if ((el = on("[data-act]"))) decide([view.tc.id], +el.dataset.act, view.tc.vacancy_id);
+  else if ((el = on("[data-spot]"))) spotAnswer(+el.dataset.spot, !!el.dataset.agree);
+  else if (on("[data-tbatch]")) decide(picked(), 4);
+  else if (on("[data-tpack]")) {
+    const rows = view.tri.t.fit.filter((r) => picked().includes(r.id));
+    if (!rows.length) return toast("Отметьте хотя бы одного кандидата");
+    const vid = rows[0].vacancy_id;
+    const same = rows.filter((r) => r.vacancy_id === vid);
+    if (same.length < rows.length) toast(`Пакет — по «${esc(rows[0].title)}». Остальных отправьте отдельным пакетом по их вакансии.`);
+    openPack(vid, same.map((r) => r.id));
+  } else if ((el = on("[data-pack]"))) openPack(el.dataset.pack, el.dataset.ids.split(",").map(Number));
+  else if (on("[data-pclose]") || t.id === "pack") modal("pack", null);
+  else if ((el = on("[data-mdec]"))) managerDecide(el.dataset.mdec);
+  else if (on("[data-merge]")) duplicate(true);
+  else if (on("[data-notdup]")) duplicate(false);
+  else if (on("[data-close]") || t.id === "sheet") modal("sheet", null);
   else if (on("[data-uclose]") || t.id === "upload") modal("upload", null);
   else if (on("[data-cancel]") || t.id === "confirm") modal("confirm", null);
   else if ((el = on("[data-ok]"))) confirmed(el.dataset.ok);
@@ -643,8 +984,10 @@ document.addEventListener("click", async (e) => {
   } else if ((el = on("[data-href]"))) go(el.dataset.href);
   else if (on("[data-pii]")) {
     st.pii = !st.pii;
-    $("#top").innerHTML = topCand(view.vac);
-    renderDoc();
+    const r = route();
+    if (r.name === "cand") view.cand = null; // перечитать карточку с ФИО или без
+    if (r.name === "triage") renderTriage();
+    else render();
   } else if ((el = on("[data-tab]"))) {
     st.tab = el.dataset.tab;
     renderPane();
@@ -676,9 +1019,32 @@ document.addEventListener("input", (e) => {
   }, 300);
 });
 
+document.addEventListener("change", (e) => {
+  if (e.target.matches("[data-pickrow]") && $("#tcount")) $("#tcount").textContent = `(${picked().length})`;
+});
+
+document.addEventListener("submit", (e) => {
+  if (e.target.id !== "lgform") return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  login({ login: f.get("login"), password: f.get("password") });
+});
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") ["sheet", "upload", "confirm"].forEach((id) => modal(id, null));
+  if (e.key === "Escape") ["sheet", "upload", "confirm", "pack"].forEach((id) => modal(id, null));
+  if (e.key === "Enter" && e.target.matches("[role=button][data-href]")) return go(e.target.dataset.href);
+  // «Разбор»: 1–4 — решение, ← → — листать, Enter — открыть разбор кандидата
+  const tc = view.tc;
+  if (route().name !== "triage" || st.bk !== "need" || !tc || !st.me || document.querySelector(".scrim")) return;
+  if (e.target.closest("input,textarea,select") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (["1", "2", "3", "4"].includes(e.key)) decide([tc.id], +e.key, tc.vacancy_id);
+  else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    st.ti += e.key === "ArrowRight" ? 1 : -1;
+    drawTriage();
+  } else if (e.key === "Enter" && !e.target.closest("button,a")) go(`#/candidates/${tc.id}/vacancy/${encodeURIComponent(tc.vacancy_id)}`);
 });
 
 prevHash = location.hash;
-render();
+api("/api/me")
+  .then(enter)
+  .catch(() => showLogin());
