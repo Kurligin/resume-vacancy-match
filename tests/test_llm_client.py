@@ -146,3 +146,16 @@ def test_cache_ttl_and_purge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert llm.purge_expired() == 1
     with sqlite3.connect(tmp_path / "cache.sqlite") as db:
         assert db.execute("SELECT count(*) FROM cache").fetchone()[0] == 0
+
+
+def test_openrouter_model_without_reasoning_retries_without_it(tmp_path: Path) -> None:
+    # require_parameters: модель без рассуждений не найдёт провайдера с параметром reasoning
+    err = openai.NotFoundError.__new__(openai.NotFoundError)
+    Exception.__init__(err, "No endpoints found that can handle the requested parameters")
+    fake = FakeOpenAI([err, '{"value": 1}', '{"value": 2}'])
+    llm = make(tmp_path, fake, base_url="https://openrouter.ai/api/v1")
+    assert llm.complete(MSGS, Answer, "v1") == Answer(value=1)
+    assert llm.complete(MSGS, Answer, "v2") == Answer(value=2)
+    assert "reasoning" in fake.calls[0]["extra_body"]
+    assert all("reasoning" not in c["extra_body"] for c in fake.calls[1:])
+    assert fake.calls[1]["response_format"]["type"] == "json_schema"
