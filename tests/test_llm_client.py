@@ -86,7 +86,11 @@ def test_openrouter_extra_body(tmp_path: Path) -> None:
     fake = FakeOpenAI(['{"value": 1}'])
     make(tmp_path, fake, base_url="https://openrouter.ai/api/v1").complete(MSGS, Answer, "v1")
     body = fake.calls[0]["extra_body"]
-    assert body["provider"] == {"require_parameters": True, "data_collection": "deny"}
+    assert body["provider"] == {
+        "require_parameters": True,
+        "data_collection": "deny",
+        "sort": "throughput",
+    }
     assert body["reasoning"] == {"enabled": False}  # рассуждения съедали лимит и время
     assert fake.calls[0]["max_tokens"] == 4096
 

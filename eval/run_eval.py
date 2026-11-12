@@ -12,6 +12,7 @@ import os
 import secrets
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -177,11 +178,19 @@ def main() -> int:
 
     t0 = time.time()
     reports: dict[str, dict[str, Any]] = {}
-    for res in gold["resumes"]:
+
+    def one(res: dict[str, Any]) -> None:
         rep = analyze(load_path(data / res["file"]), vacancies, llm, today, source_name=res["file"])
         print(f"{res['label']}: {rep.error or 'готово'} · {rep.elapsed_s:.0f} с")
         if not rep.error:
             reports[res["label"]] = rep.model_dump(mode="json")
+
+    # первое резюме отдельно — чтобы требования вакансий попали в кэш, остальные параллельно
+    first, rest = gold["resumes"][:1], gold["resumes"][1:]
+    for res in first:
+        one(res)
+    with ThreadPoolExecutor(max_workers=int(os.environ.get("RVM_EVAL_PARALLEL", "4"))) as pool:
+        list(pool.map(one, rest))
 
     m = evaluate(gold, reports)
     m["model"] = llm.model

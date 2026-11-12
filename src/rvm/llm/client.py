@@ -132,9 +132,11 @@ class LLMClient:
             "max_tokens": self.max_tokens,
         }
         if "openrouter" in self.base_url:
-            kwargs["extra_body"] = {
-                "provider": {"require_parameters": True, "data_collection": "deny"}
-            }
+            provider: dict[str, Any] = {"require_parameters": True, "data_collection": "deny"}
+            # одну модель держат несколько хостеров, скорость у них различается в разы
+            if sort := os.environ.get("LLM_PROVIDER_SORT", "throughput"):
+                provider["sort"] = sort
+            kwargs["extra_body"] = {"provider": provider}
             if self._reasoning_off:
                 # гибридные модели (qwen3) иначе «думают» в десятки раз дольше ответа
                 kwargs["extra_body"]["reasoning"] = {"enabled": False}
