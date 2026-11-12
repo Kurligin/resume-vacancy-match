@@ -1,4 +1,4 @@
-// Интерфейс: вход, «Разбор», «Кандидаты», разбор кандидата, пакет для заказчика, загрузка. Данные — из /api, без сборки.
+// Интерфейс: вход, «Разбор», «Кандидаты», «Вакансии», разбор кандидата, пакет для заказчика, загрузка. Данные — из /api, без сборки.
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) =>
@@ -89,7 +89,8 @@ function route() {
   const p = location.hash.replace(/^#\/?/, "").split("/");
   if (p[0] === "candidates" && p[2] === "vacancy") return { name: "cand", id: +p[1], vid: p[3] ? decodeURIComponent(p[3]) : null };
   if (p[0] === "candidates" && p[1]) return { name: "base", id: +p[1] };
-  if (p[0] === "triage" || p[0] === "vacancies") return { name: p[0] };
+  if (p[0] === "vacancies") return { name: "vacancies", vid: p[1] ? decodeURIComponent(p[1]) : null };
+  if (p[0] === "triage") return { name: "triage" };
   return { name: "base", id: null };
 }
 
@@ -124,9 +125,7 @@ async function render(scroll = false) {
   }
   if (r.name === "vacancies") {
     stopPoll();
-    $("#top").innerHTML = `<div class="head"><span class="avatar blue">${ic("brief")}</span><div class="who"><h1>Вакансии</h1></div></div>${stateBox("empty", "Раздел появится в следующей версии.")}`;
-    $("#doc").innerHTML = "";
-    return;
+    return renderVacs(r);
   }
   if (r.name === "cand") return renderCand(r);
   return renderBase(r);
@@ -352,6 +351,123 @@ function topCand(vac) {
     })
     .join("")}</div>`;
   return h;
+}
+
+/* ---------- «Вакансии» ---------- */
+
+const CELL = { fit: "s-full", partial: "s-partial" };
+const isOk = (c) => c.verdict === "fit" || c.verdict === "partial";
+let vacTimer = null;
+
+async function renderVacs(r) {
+  clearTimeout(vacTimer);
+  if (!view.vl) $("#top").innerHTML = stateBox("load", "Загружаем вакансии…");
+  try {
+    const vacs = (await api("/api/vacancies")).filter((v) => v.is_open);
+    const ranks = await Promise.all(vacs.map((v) => api(`/api/vacancies/${encodeURIComponent(v.id)}/candidates?pii=${st.pii}`)));
+    ranks.forEach(remember);
+    view.vl = { vacs, ranks };
+  } catch (e) {
+    $("#top").innerHTML = failed(e);
+    $("#doc").innerHTML = "";
+    return;
+  }
+  const { vacs } = view.vl;
+  const i = Math.max(0, vacs.findIndex((v) => v.id === r.vid));
+  $("#top").innerHTML = topVacs(i);
+  $("#doc").innerHTML = vacCard(i);
+  // сверка резерва идёт в фоне — перечитываем, пока не закончится
+  if (vacs.some((v) => v.reserve_state === "running"))
+    vacTimer = setTimeout(() => route().name === "vacancies" && renderVacs(route()), POLL_MS);
+}
+
+function topVacs(i) {
+  const { vacs, ranks } = view.vl;
+  const add = `<button class="btn btn-ghost" data-upload="vac">${ic("plus", "i-sm")}Добавить вакансию</button>`;
+  const head = (title, sub) =>
+    `<div class="head"><span class="avatar blue">${ic("brief")}</span><div class="who"><h1>${title}</h1>${sub}</div><div class="side"><span style="display:flex;gap:8px">${add}</span>${piiTog()}</div></div>`;
+  if (!vacs.length) return head("Вакансии", "") + stateBox("empty", "Открытых вакансий нет. Добавьте вакансию файлом, текстом или с hh.ru.");
+  const v = vacs[i];
+  const rows = ranks[i];
+  const ok = rows.filter(isOk).length;
+  let h = head(
+    esc(v.title),
+    `<div class="sub"><span>${ic("brief", "i-sm")}${vacs.length} ${plural(vacs.length, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span><span>${ic("users", "i-sm")}${rows.length} резюме · ${ok} ${plural(ok, "подходит", "подходят", "подходят")} хотя бы частично</span></div>`,
+  );
+  const m = v.reserve_matches.length;
+  if (v.reserve_state === "running")
+    h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>Сверяем с резервом…</b> Проверено ${v.reserve_checked}.</div></div>`;
+  else if (v.reserve_state === "error")
+    h += `<div class="callout"><span class="ico">${ic("alert")}</span><div><b>Сверка с резервом не удалась:</b> ${esc(v.reserve_error)}</div></div>`;
+  else if (m)
+    h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>В резерве ${plural(m, "нашёлся", "нашлись", "нашлись")} ${m} ${plural(m, "подходящий", "подходящих", "подходящих")}.</b> ${v.reserve_matches.map(cname).join(", ")}.</div><a class="btn btn-white" href="#/candidates/${v.reserve_matches[0]}/vacancy/${encodeURIComponent(v.id)}">Показать</a></div>`;
+  const cols = [...new Set(ranks.flat().map((c) => c.id))];
+  const col = (id) => (st.pii && names[id] ? esc(names[id].split(" ")[0]) : `К${id}`);
+  if (cols.length)
+    h += `<div class="card heat"><div class="heat-h"><b>${ic("grid", "c-acc")}Все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
+   <div style="overflow-x:auto"><div class="hg" style="grid-template-columns:minmax(200px,1fr) repeat(${cols.length},56px)"><span></span>${cols.map((id) => `<span class="ch" title="${cname(id)}">${col(id)}</span>`).join("")}
+   ${vacs
+     .map(
+       (x, k) =>
+         `<button class="hname ${k === i ? "on" : ""}" data-href="#/vacancies/${encodeURIComponent(x.id)}">${ic("brief", "i-sm")}${esc(x.title)}</button>${cols
+           .map((id) => {
+             const c = ranks[k].find((y) => y.id === id);
+             return c
+               ? `<button class="hcell num ${CELL[c.verdict] ?? "s-unknown"}" data-href="#/candidates/${id}/vacancy/${encodeURIComponent(x.id)}" title="${cname(id)} · ${esc(x.title)}">${num(c.score)}</button>`
+               : `<span class="hcell" title="нет оценки" style="color:var(--fg3)">–</span>`;
+           })
+           .join("")}`,
+     )
+     .join("")}</div></div></div>`;
+  h += `<div class="card rank" aria-label="Рейтинг кандидатов">${
+    rows.length
+      ? rows
+          .map((c, n) => {
+            const vv = VERDICT[c.verdict];
+            return `<button class="rrow" data-href="#/candidates/${c.id}/vacancy/${encodeURIComponent(v.id)}"><span class="tile round ${vv[2]}">${ic("user")}<em class="num">${n + 1}</em></span>
+     <span><div class="t">${cname(c.id)}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${PS[c.status][0]}</span>${c.blockers.length ? `<span class="bl">${ic("lock", "i-sm")}${esc(whyShort(c.blockers))}</span>` : ""}</div></span>${scoreCell(c)}<span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></button>`;
+          })
+          .join("")
+      : `<div class="stub" style="padding:18px">${ic("users")}Оценок по вакансии пока нет: они появятся после загрузки резюме и сверки резерва.</div>`
+  }</div>`;
+  return h;
+}
+
+function vacCard(i) {
+  const v = view.vl.vacs[i];
+  if (!v) return `<div class="stub" style="padding:18px">${ic("brief")}Добавьте первую вакансию — её карточка появится здесь.</div>`;
+  const rows = view.vl.ranks[i];
+  const n = (f) => rows.filter(f).length;
+  const src = v.source.startsWith("hh:") ? "с hh.ru" : v.source === "файл" ? "из файла" : "из текста";
+  return `<div class="ccard"><div class="ch1"><span class="avatar blue">${ic("brief")}</span><div><h2>${esc(v.title)}</h2><div class="sub" style="margin-top:2px"><span>${ic("cal", "i-sm")}добавлена ${day(v.created_at)} ${src}</span></div></div></div>
+   <div class="sec">Кандидаты</div>
+   <div class="ev">${ic("check", "c-full")}<span>подходят</span><span class="n num">${n((c) => c.verdict === "fit")}</span></div>
+   <div class="ev">${ic("half", "c-part")}<span>частично</span><span class="n num">${n((c) => c.verdict === "partial")}</span></div>
+   <div class="ev">${ic("x")}<span>не подходят</span><span class="n num">${n((c) => !isOk(c))}</span></div>
+   <div class="cactions"><button class="btn btn-danger" data-vclose="${esc(v.id)}">${ic("x", "i-sm")}Закрыть вакансию</button></div></div>`;
+}
+
+function openVacClose(vid) {
+  const v = view.vl.vacs.find((x) => x.id === vid);
+  modal(
+    "confirm",
+    `<div class="alert" role="alertdialog" aria-label="Подтверждение">
+   <div class="ai" style="background:var(--no-bg);color:var(--no)">${ic("x")}</div>
+   <h3>Закрыть вакансию «${esc(v.title)}»?</h3>
+   <p>Она пропадёт из рейтингов и сверки резерва. Оценки кандидатов останутся в их карточках.</p>
+   <div class="row"><button class="btn btn-ghost" data-cancel>Отмена</button><button class="btn btn-red" data-vclosed="${esc(vid)}">Закрыть</button></div></div>`,
+  );
+}
+
+async function closeVac(vid) {
+  modal("confirm", null);
+  try {
+    await post(`/api/vacancies/${encodeURIComponent(vid)}/close`);
+  } catch (e) {
+    return toast(`Не получилось: ${e.message}`);
+  }
+  toast("Вакансия закрыта");
+  go("#/vacancies");
 }
 
 // первая цитата, на которую ссылается пункт вывода: R… — строка требования
@@ -792,23 +908,12 @@ async function confirmed(kind) {
   }
 }
 
-async function openUpload() {
-  const d = modal(
-    "upload",
-    `<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
-   <div class="seg"><button aria-pressed="true">${ic("user", "i-sm")}Резюме</button><button aria-pressed="false" disabled title="скоро">${ic("brief", "i-sm")}Вакансии</button></div>
-   <label class="drop" id="drop"><input type="file" id="files" multiple hidden accept=".docx,.doc,.pdf,.rtf,.txt,.odt,.html,.htm,.jpg,.jpeg,.png,.heic,.webp,.tif,.tiff,.zip"><div class="di">${ic("upload")}</div><b>Перетащите резюме или выберите файлы</b><small>одно, пачка или zip · docx, pdf, rtf, txt, doc, сканы jpg и png</small><div class="files" id="picked"></div></label>
-   <label class="fld" style="margin-top:8px"><span>Отклик</span><select class="sel" id="applied" aria-label="Отклик на вакансию"><option value="">не указано</option></select></label>
-   <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("eyeoff", "i-sm")}ФИО, контакты, пол и возраст скрываются до анализа. Повторное резюме того же человека попадёт в его карточку.</div>
-   <div class="actions"><button class="btn btn-ghost" data-uclose>Отмена</button><button class="btn btn-primary" data-ugo disabled>${ic("upload", "i-sm")}Загрузить</button></div></div>`,
-  );
-  let files = [];
-  const pick = (list) => {
-    files = [...list];
-    d.querySelector("#picked").textContent = files.map((f) => f.name).join(", ");
-    d.querySelector("[data-ugo]").disabled = !files.length;
-  };
-  d.querySelector("#files").addEventListener("change", (e) => pick(e.target.files));
+const uploadTabs = (res) =>
+  `<div class="seg"><button aria-pressed="${res}" data-upload="res">${ic("user", "i-sm")}Резюме</button><button aria-pressed="${!res}" data-upload="vac">${ic("brief", "i-sm")}Вакансии</button></div>`;
+
+// файлы из выбора и перетаскивания; onPick(files)
+function dropZone(d, onPick) {
+  d.querySelector("#files").addEventListener("change", (e) => onPick([...e.target.files]));
   const drop = d.querySelector("#drop");
   drop.addEventListener("dragover", (e) => {
     e.preventDefault();
@@ -818,7 +923,26 @@ async function openUpload() {
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("over");
-    pick(e.dataTransfer.files);
+    onPick([...e.dataTransfer.files]);
+  });
+}
+
+async function openUpload(tab) {
+  if (tab === "vac") return openVacUpload();
+  const d = modal(
+    "upload",
+    `<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
+   ${uploadTabs(true)}
+   <label class="drop" id="drop"><input type="file" id="files" multiple hidden accept=".docx,.doc,.pdf,.rtf,.txt,.odt,.html,.htm,.jpg,.jpeg,.png,.heic,.webp,.tif,.tiff,.zip"><div class="di">${ic("upload")}</div><b>Перетащите резюме или выберите файлы</b><small>одно, пачка или zip · docx, pdf, rtf, txt, doc, сканы jpg и png</small><div class="files" id="picked"></div></label>
+   <label class="fld" style="margin-top:8px"><span>Отклик</span><select class="sel" id="applied" aria-label="Отклик на вакансию"><option value="">не указано</option></select></label>
+   <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("eyeoff", "i-sm")}ФИО, контакты, пол и возраст скрываются до анализа. Повторное резюме того же человека попадёт в его карточку.</div>
+   <div class="actions"><button class="btn btn-ghost" data-uclose>Отмена</button><button class="btn btn-primary" data-ugo disabled>${ic("upload", "i-sm")}Загрузить</button></div></div>`,
+  );
+  let files = [];
+  dropZone(d, (list) => {
+    files = list;
+    d.querySelector("#picked").textContent = files.map((f) => f.name).join(", ");
+    d.querySelector("[data-ugo]").disabled = !files.length;
   });
   d.querySelector("[data-ugo]").addEventListener("click", async (e) => {
     e.target.disabled = true;
@@ -846,6 +970,87 @@ async function openUpload() {
   } catch {
     /* без списка вакансий загрузка всё равно возможна */
   }
+}
+
+function openVacUpload() {
+  const d = modal(
+    "upload",
+    `<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
+   ${uploadTabs(false)}
+   <label class="drop" id="drop"><input type="file" id="files" multiple hidden accept=".docx,.doc,.pdf,.rtf,.txt,.odt,.html,.htm"><div class="di">${ic("file")}</div><b>Перетащите файл вакансии или выберите</b><small>docx, pdf, rtf, txt</small><div class="files" id="picked"></div></label>
+   <textarea class="ed" id="vtext" style="min-height:90px" aria-label="Текст вакансии" placeholder="или вставьте текст вакансии"></textarea>
+   <div class="or">или</div>
+   <button class="mipt" id="hhload"><span class="di">${ic("download")}</span><span><b>Актуальные вакансии МФТИ</b><small>открытые вакансии на hh.ru</small></span></button>
+   <div id="hh"></div>
+   <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("archive", "i-sm")}Новая вакансия сразу сверяется с кадровым резервом.</div>
+   <div class="actions"><button class="btn btn-ghost" data-uclose>Отмена</button><button class="btn btn-primary" data-vgo disabled>${ic("plus", "i-sm")}Добавить</button></div></div>`,
+  );
+  let files = [];
+  const go_ = d.querySelector("[data-vgo]");
+  const hhIds = () => [...d.querySelectorAll("#hh input:checked:not(:disabled)")].map((x) => x.value);
+  const count = () => files.length + (d.querySelector("#vtext").value.trim() ? 1 : 0) + hhIds().length;
+  const update = () => {
+    const n = count();
+    go_.disabled = !n;
+    go_.lastChild.textContent = n > 1 ? `Добавить ${n} ${plural(n, "вакансию", "вакансии", "вакансий")}` : "Добавить";
+  };
+  dropZone(d, (list) => {
+    files = list;
+    d.querySelector("#picked").textContent = files.map((f) => f.name).join(", ");
+    update();
+  });
+  d.querySelector("#vtext").addEventListener("input", update);
+  d.querySelector("#hh").addEventListener("change", update);
+  d.querySelector("#hhload").addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    const box = d.querySelector("#hh");
+    box.innerHTML = `<div class="stub">${ic("clock")}Загружаем список с hh.ru…</div>`;
+    try {
+      const list = await api("/api/vacancies/hh");
+      box.innerHTML = list.length
+        ? `<div class="vlist">${list.map((v) => `<label class="vli"><input type="checkbox" value="${esc(v.id)}" ${v.imported ? "checked disabled" : ""}>${esc(v.name)}<small>${v.imported ? "уже в базе" : esc(v.area)}</small></label>`).join("")}</div>`
+        : `<div class="stub">${ic("inbox")}Открытых вакансий на hh.ru нет.</div>`;
+    } catch (err) {
+      const off = /не настроена/.test(err.message);
+      box.innerHTML = `<div class="state err">${ic("alert")}${off ? "Загрузка с hh не настроена на сервере. Добавьте вакансию файлом или текстом." : esc(err.message)}</div>`;
+    }
+  });
+  go_.addEventListener("click", async () => {
+    go_.disabled = true;
+    const ids = [];
+    const errs = [];
+    const text = d.querySelector("#vtext").value.trim();
+    const forms = files.map((f) => ["file", f, f.name]);
+    if (text) forms.push(["text", text]);
+    for (const [k, val, name] of forms) {
+      const fd = new FormData();
+      if (name) fd.append(k, val, name);
+      else fd.append(k, val);
+      try {
+        ids.push((await api("/api/vacancies", { method: "POST", body: fd })).id);
+      } catch (err) {
+        errs.push((name ?? "текст") + ": " + err.message); // текст для тоста
+      }
+    }
+    if (hhIds().length) {
+      try {
+        const r = await post("/api/vacancies/hh/import", { ids: hhIds() });
+        ids.push(...r.added);
+        errs.push(...Object.values(r.errors));
+      } catch (err) {
+        errs.push("hh.ru: " + err.message);
+      }
+    }
+    if (!ids.length) {
+      go_.disabled = false;
+      return toast(`Вакансии не добавлены: ${errs.join("; ")}`);
+    }
+    modal("upload", null);
+    view.vl = null;
+    go(`#/vacancies/${encodeURIComponent(ids.at(-1))}`);
+    const n = ids.length;
+    toast(`${n > 1 ? `Добавлено ${n} ${plural(n, "вакансия", "вакансии", "вакансий")}` : "Вакансия добавлена"} · сверяем с резервом${errs.length ? `. Не добавлено: ${errs.join("; ")}` : ""}`);
+  });
 }
 
 async function managerDecide(kind) {
@@ -978,7 +1183,9 @@ document.addEventListener("click", async (e) => {
   else if ((el = on("[data-reply]"))) {
     e.preventDefault();
     openReply(+el.dataset.reply);
-  } else if (on("[data-upload]")) openUpload();
+  } else if ((el = on("[data-upload]"))) openUpload(el.dataset.upload || (route().name === "vacancies" ? "vac" : "res"));
+  else if ((el = on("[data-vclose]"))) openVacClose(el.dataset.vclose);
+  else if ((el = on("[data-vclosed]"))) closeVac(el.dataset.vclosed);
   else if ((el = on("[data-confirm]"))) openConfirm(el.dataset.confirm);
   else if (on("[data-qclose]")) {
     st.batch = view.batch = null;
