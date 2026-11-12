@@ -72,9 +72,11 @@ const post = (path, body) => api(path, { method: "POST", headers: { "Content-Typ
 
 const stateBox = (kind, text) =>
   `<div class="card state ${kind === "err" ? "err" : ""}">${ic(kind === "err" ? "alert" : kind === "empty" ? "inbox" : "clock")}${esc(text)}</div>`;
-const failed = (e) => stateBox("err", `Не удалось загрузить данные: ${e.message}. Обновите страницу.`);
+const failed = (e) => stateBox("err", "Не удалось загрузить данные: " + e.message + ". Обновите страницу."); // stateBox экранирует
 const names = {}; // ФИО из ответов API — только при включённом переключателе
-const cname = (id) => (st.pii && names[id]) || `Кандидат ${id}`;
+// ФИО руководителю API отдаёт, только если пакет ушёл с «ФИО в документе»
+const nameText = (id) => ((st.pii || mgr()) && names[id]) || `Кандидат ${id}`;
+const cname = (id) => esc(nameText(id)); // для разметки; в textContent — nameText
 const remember = (list) => list.forEach((c) => c.name && (names[c.id] = c.name));
 const plural = (n, one, few, many) =>
   n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many;
@@ -187,7 +189,7 @@ function topBase() {
     .map(
       (c) => `<button class="crow" aria-selected="${c.id === sel}" data-href="#/candidates/${c.id}">
      <span class="tile round">${ic("user")}</span>
-     <span><div class="t" style="font-weight:600">${esc(cname(c.id))}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(c.created_at)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
+     <span><div class="t" style="font-weight:600">${cname(c.id)}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(c.created_at)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
      <span class="best"><b class="num">${num(c.best_vacancy_score ?? c.best_score)}</b><span>${esc(c.best_title ?? "лучший балл")}</span></span>
      <span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>${!mgr() && c.waiting && c.waiting_days ? `<div class="wait">${ic("bell", "i-sm")}ждёт ${c.waiting_days} дн.</div>` : ""}</span>
      ${mgr() ? "<span></span>" : `<span class="reply btn btn-ghost" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</span>`}</button>`,
@@ -201,13 +203,13 @@ const EVENT = {
   possible_duplicate: (d) => `Похож на ${cname(d.of)} — возможный дубль`,
   merged: (d) => `Объединён с карточкой ${cname(d.from)}`,
   not_duplicate: () => "Отмечено: не дубль",
-  evaluated: (d, t) => `Оценка по «${t}»: ${num(d.score)}`,
+  evaluated: (d, t) => `Оценка по «${esc(t)}»: ${num(d.score)}`,
   status: (d) =>
-    `${d.decision === "invite" ? "Решение: пригласить на интервью" : d.decision === "reject" ? "Решение: не подходит" : d.package ? "Отправлен заказчику в пакете" : typeof d.decision === "number" ? `Решение в разборе: ${ACT[d.decision][0].toLowerCase()}` : `Статус: ${PS[d.to]?.[0] ?? d.to}`}${d.comment ? ` · «${d.comment}»` : ""}`,
+    `${d.decision === "invite" ? "Решение: пригласить на интервью" : d.decision === "reject" ? "Решение: не подходит" : d.package ? "Отправлен заказчику в пакете" : typeof d.decision === "number" ? `Решение в разборе: ${ACT[d.decision][0].toLowerCase()}` : `Статус: ${esc(PS[d.to]?.[0] ?? d.to)}`}${d.comment ? ` · «${esc(d.comment)}»` : ""}`,
   reply_sent: () => "Отмечено: ответ отправлен",
   spot_check: (d) => `Выборочная проверка: ${d.agree ? "согласен с отказом" : "не согласен — на решение"}`,
-  clarified: (d) => `Уточнено: ${d.check}`,
-  answer: (d, t) => `Ответ по ${d.requirement} («${t}»): ${ST[d.answer]?.[0] ?? d.answer} · балл ${num(d.before)} → ${num(d.after)}`,
+  clarified: (d) => `Уточнено: ${esc(d.check)}`,
+  answer: (d, t) => `Ответ по ${esc(d.requirement)} («${esc(t)}»): ${esc(ST[d.answer]?.[0] ?? d.answer)} · балл ${num(d.before)} → ${num(d.after)}`,
   deleted: () => "Удалён",
 };
 
@@ -230,11 +232,11 @@ async function renderCard(id) {
     ? `<textarea class="mnote" id="mgrnote" aria-label="Комментарий рекрутеру" placeholder="Комментарий рекрутеру"></textarea>${best ? `<a class="btn btn-ghost" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(best.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор</a>` : ""}<button class="btn btn-primary" data-mdec="invite">${ic("check", "i-sm")}Пригласить на интервью</button><button class="btn btn-danger" data-mdec="reject">${ic("x", "i-sm")}Не подходит</button>`
     : `${best ? `<a class="btn btn-ghost" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(best.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор</a>` : ""}<button class="btn btn-primary" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</button>
     ${c.status !== "reserve" ? `<button class="btn btn-ghost" data-confirm="reserve">${ic("archive", "i-sm")}В резерв</button>` : ""}<button class="btn btn-danger" data-confirm="delete">${ic("trash", "i-sm")}Удалить</button>`;
-  $("#doc").innerHTML = `<div class="ccard"><div class="ch1"><span class="avatar">${ic("user")}</span><div><h2>${esc(cname(c.id))}</h2><div class="sub" style="margin-top:2px">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${c.versions.length} ${plural(c.versions.length, "версия", "версии", "версий")} резюме · с ${day(c.created_at)}</span></div></div></div>
-   ${dup && !mgr() ? `<div class="callout"><span class="ico">${ic("users")}</span><div><b>Возможный повтор:</b> похож на ${esc(cname(dup))}.</div><button class="btn btn-white" data-merge="${dup}">Объединить</button><button class="btn btn-white" data-notdup>Разные люди</button></div>` : ""}
+  $("#doc").innerHTML = `<div class="ccard"><div class="ch1"><span class="avatar">${ic("user")}</span><div><h2>${cname(c.id)}</h2><div class="sub" style="margin-top:2px">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${c.versions.length} ${plural(c.versions.length, "версия", "версии", "версий")} резюме · с ${day(c.created_at)}</span></div></div></div>
+   ${dup && !mgr() ? `<div class="callout"><span class="ico">${ic("users")}</span><div><b>Возможный повтор:</b> похож на ${cname(dup)}.</div><button class="btn btn-white" data-merge="${dup}">Объединить</button><button class="btn btn-white" data-notdup>Разные люди</button></div>` : ""}
    <div class="sec">Статус</div><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>${!mgr() && c.replied_at ? ` <span class="done-chip">${ic("check", "i-sm")}Отмечено: отправлен ${day(c.replied_at)}</span>` : !mgr() && c.waiting_days ? ` <span class="wait">${ic("bell", "i-sm")}ждёт ответа ${c.waiting_days} дн.</span>` : ""}
    <div class="sec">Оценки по вакансиям</div>${ev.length ? ev.map((e) => { const v = VERDICT[e.verdict]; return `<a class="ev" href="#/candidates/${c.id}/vacancy/${encodeURIComponent(e.vacancy_id)}">${ic(v[3], v[4])}<span>${esc(e.title ?? e.vacancy_id)}</span><span class="n num">${num(e.score)}</span></a>`; }).join("") : `<div class="stub">${ic("clock")}Оценок пока нет.</div>`}
-   <div class="sec">История</div><div class="tl">${hist.map((e) => `<div class="tli ${e.who !== "система" ? "acc" : ""}"><time class="num">${stamp(e.at)}</time>${esc(EVENT[e.type](e.details, title(e.vacancy_id)))}${e.who !== "система" ? ` <span class="who">· ${esc(e.who)}</span>` : ""}</div>`).join("")}</div>
+   <div class="sec">История</div><div class="tl">${hist.map((e) => `<div class="tli ${e.who !== "система" ? "acc" : ""}"><time class="num">${stamp(e.at)}</time>${EVENT[e.type](e.details, title(e.vacancy_id))}${e.who !== "система" ? ` <span class="who">· ${esc(e.who)}</span>` : ""}</div>`).join("")}</div>
    <div class="cactions">${acts}</div></div>`;
 }
 
@@ -264,6 +266,9 @@ async function startPoll() {
   renderQueue();
 }
 
+const fileState = (f) =>
+  f.state === "error" && f.message.startsWith(f.name) ? f.message : f.name + " · " + (f.state === "error" ? f.message : "распознаём");
+
 function renderQueue() {
   const el = $("#queue");
   const b = view.batch;
@@ -280,7 +285,7 @@ function renderQueue() {
     <div class="bar2"><i style="width:${pct(ok)};background:var(--full)"></i><i style="width:${pct(run)};background:var(--accent)"></i><i style="width:${pct(err)};background:var(--no)"></i></div>
     <div class="qfiles">${ok ? `<span class="qf ok">${ic("check", "i-sm")}${ok} готово</span>` : ""}${b.files
       .filter((f) => f.state === "reading" || f.state === "error")
-      .map((f) => `<span class="qf ${f.state === "error" ? "err" : "run"}">${ic(f.state === "error" ? "alert" : "clock", "i-sm")}${esc(f.state === "error" && f.message.startsWith(f.name) ? f.message : `${f.name} · ${f.state === "error" ? f.message : "распознаём"}`)}</span>`)
+      .map((f) => `<span class="qf ${f.state === "error" ? "err" : "run"}">${ic(f.state === "error" ? "alert" : "clock", "i-sm")}${esc(fileState(f))}</span>`)
       .join("")}</div></div>`;
 }
 
@@ -327,7 +332,7 @@ function topCand(vac) {
   const back = st.from && !st.from.startsWith(`#/candidates/${id}/vacancy`) ? st.from : `#/candidates/${id}`;
   const backLabel = back.startsWith("#/triage") ? "Разбор откликов" : back.startsWith("#/vacancies") ? "Вакансии" : "Кандидаты";
   const file = card.versions[0]?.name;
-  let h = `<a class="back" href="${esc(back)}">${ic("chev", "i-sm")}${backLabel}</a><div class="head"><span class="avatar">${ic("user")}</span><div class="who"><h1>${esc(cname(id))}</h1>
+  let h = `<a class="back" href="${esc(back)}">${ic("chev", "i-sm")}${backLabel}</a><div class="head"><span class="avatar">${ic("user")}</span><div class="who"><h1>${cname(id)}</h1>
     <div class="sub">${report.applied ? `<span>${ic("inbox", "i-sm")}отклик на «${esc(title(report.applied))}»${report.applied_guessed ? " · определён по письму" : ""}</span>` : ""}${st.pii && file ? `<span>${ic("file", "i-sm")}${esc(file)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(card.created_at)}</span></div></div>
     <div class="side"><span style="display:flex;gap:8px"><a class="btn btn-ghost" href="#/candidates/${id}">${ic("hist", "i-sm")}Карточка и история</a>${mgr() ? "" : `<button class="btn btn-ghost" data-reply="${id}">${ic("send", "i-sm")}Ответить</button>${vac ? `<button class="btn btn-ghost" data-pack="${esc(vac.id)}" data-ids="${id}">${ic("send", "i-sm")}Для заказчика</button>` : ""}`}</span>${mgr() ? "" : piiTog()}</div></div>`;
   if (!vac) return h;
@@ -395,7 +400,7 @@ function renderPane() {
       const row = rowOf(req.id) ?? { status: "unknown", evidence: [], flags: [], note: "" };
       if (req.section !== g) {
         g = req.section;
-        h += `<div class="grp">${SECTION[g] ?? esc(g)}</div>`;
+        h += `<div class="grp">${esc(SECTION[g] ?? g)}</div>`;
       }
       const flags = [
         ...(row.exceeds ? [`<span class="flag plus">${ic("up", "i-sm")}${esc(row.exceeds)}</span>`] : []),
@@ -421,7 +426,7 @@ function renderPane() {
     const ls = v.letters;
     const cur = ls.find((l) => l.kind === st.letter) ?? ls.find((l) => l.suggested) ?? ls[0];
     h = cur
-      ? `<div class="why">Черновик — отправляет рекрутер.</div>${ls.length > 1 ? `<div class="seg" style="width:max-content;margin-top:10px">${ls.map((l) => `<button aria-pressed="${l === cur}" data-letter="${esc(l.kind)}">${LETTER[l.kind] ?? esc(l.kind)}</button>`).join("")}</div>` : ""}<div class="letter" id="lettertext">${esc(cur.text)}</div><div class="actions"><button class="btn btn-ghost" data-copy="#lettertext">${ic("copy", "i-sm")}Скопировать</button></div>`
+      ? `<div class="why">Черновик — отправляет рекрутер.</div>${ls.length > 1 ? `<div class="seg" style="width:max-content;margin-top:10px">${ls.map((l) => `<button aria-pressed="${l === cur}" data-letter="${esc(l.kind)}">${esc(LETTER[l.kind] ?? l.kind)}</button>`).join("")}</div>` : ""}<div class="letter" id="lettertext">${esc(cur.text)}</div><div class="actions"><button class="btn btn-ghost" data-copy="#lettertext">${ic("copy", "i-sm")}Скопировать</button></div>`
       : `<div class="why">Для этой пары письма нет.</div>`;
   }
   const p = $("#pane");
@@ -437,7 +442,7 @@ const renderDoc = () => ($("#doc").innerHTML = docHtml(view.cand.id, view.cand.r
 
 function docHtml(id, r) {
   const lines = st.pii ? r.original : r.lines;
-  let h = `<h2>${ic("file")}${esc(cname(id))} · ${st.pii ? "исходный текст" : "текст, который видела модель"}</h2>`;
+  let h = `<h2>${ic("file")}${cname(id)} · ${st.pii ? "исходный текст" : "текст, который видела модель"}</h2>`;
   let blk = null;
   for (const ln of lines) {
     let tx = esc(ln.text);
@@ -460,7 +465,7 @@ function highlight(ev) {
     if (!el) return;
     const s = el.lastChild;
     s.dataset.orig = s.dataset.orig || s.innerHTML;
-    if (q && !st.pii) s.innerHTML = s.dataset.orig.replace(esc(q), `<mark>${esc(q)}</mark>`);
+    if (q && !st.pii) s.innerHTML = s.dataset.orig.replace(esc(q), () => `<mark>${esc(q)}</mark>`);
     el.classList.add("hl");
     if (j === 0) el.scrollIntoView({ block: "center", behavior: reduced() ? "auto" : "smooth" });
   });
@@ -480,9 +485,9 @@ async function answer(i, val) {
     });
     view.cand.report = await api(`/api/evaluations?candidate=${id}`); // места вакансий могли поменяться
     renderCand(route());
-    toast(`Пересчитано: ${esc(v.title)} — ${num(s.score)} (вилка ${num(s.low)}–${num(s.high)})`);
+    toast(`Пересчитано: ${v.title} — ${num(s.score)} (вилка ${num(s.low)}–${num(s.high)})`);
   } catch (e) {
-    toast(`Ответ не сохранён: ${esc(e.message)}`);
+    toast(`Ответ не сохранён: ${e.message}`);
   }
 }
 
@@ -523,7 +528,7 @@ function drawTriage() {
       done
         .map(
           (c) =>
-            `<div class="trow" role="button" tabindex="0" data-href="#/candidates/${c.id}" style="cursor:pointer" title="Открыть карточку в «Кандидатах»"><span></span><span class="tile round">${ic("user")}</span><span><b>${esc(cname(c.id))}</b><div class="rs">${esc(c.best_title ?? "")}</div></span><span class="num"><b>${num(c.best_vacancy_score ?? c.best_score)}</b></span><span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span></span></div>`,
+            `<div class="trow" role="button" tabindex="0" data-href="#/candidates/${c.id}" style="cursor:pointer" title="Открыть карточку в «Кандидатах»"><span></span><span class="tile round">${ic("user")}</span><span><b>${cname(c.id)}</b><div class="rs">${esc(c.best_title ?? "")}</div></span><span class="num"><b>${num(c.best_vacancy_score ?? c.best_score)}</b></span><span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span></span></div>`,
         )
         .join("") || `<div class="stub" style="padding:16px">${ic("help")}Пока ничего не разобрано. Начните с «Нужно ваше решение».</div>`
     }</div>`;
@@ -542,7 +547,7 @@ function needCard(rows) {
     a.length
       ? a.map((p) => `<button class="pt"${p.lines.length ? ` data-l="${p.lines[0]}"` : ""}>${ic(icn, c)}<span>${esc(p.text)}${p.lines.length ? `<span class="ref">L${p.lines[0]}</span>` : ""}</span></button>`).join("")
       : `<div class="stub">—</div>`;
-  return `<div class="card tcard"><div class="tc-top"><span class="avatar" style="width:44px;height:44px">${ic("user")}</span><div><h2>${esc(cname(r.id))}</h2><div class="sub" style="margin-top:2px">${r.position ? `<span>${ic("brief", "i-sm")}${esc(r.position)}</span>` : ""}</div></div>
+  return `<div class="card tcard"><div class="tc-top"><span class="avatar" style="width:44px;height:44px">${ic("user")}</span><div><h2>${cname(r.id)}</h2><div class="sub" style="margin-top:2px">${r.position ? `<span>${ic("brief", "i-sm")}${esc(r.position)}</span>` : ""}</div></div>
     <div class="tc-nav"><button data-tn="-1" aria-label="Предыдущий">${ic("chev", "i-sm")}</button><span class="num">${st.ti + 1} из ${rows.length}</span><button data-tn="1" aria-label="Следующий" style="transform:scaleX(-1)">${ic("chev", "i-sm")}</button></div></div>
    <div class="tc-best"><span class="big num">${num(r.score)}</span><span><b>${esc(r.title)}</b><div class="lbl num">лучшая вакансия · вилка ${num(r.low)}–${num(r.high)}</div></span><span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></div>
    <div class="why-here">${ic("flag", "i-sm")}Почему здесь: ${esc(r.why.join("; "))}</div>
@@ -555,13 +560,13 @@ function bucketList(all, fit) {
   const spot = fit ? null : all.find((r) => r.spot_check);
   const rows = all.filter((r) => r !== spot); // проверяемый — отдельно сверху, не в пачке
   let h = spot
-    ? `<div class="spot">${ic("help", "c-acc i-lg")}<div><b>Выборочная проверка.</b> Согласны, что ${esc(cname(spot.id))} не подходит на «${esc(spot.title)}»? Причина: ${esc(whyShort(spot.why))}.<div class="lbl">Часть откликов из «явно не подходят» система показывает вам отдельно.</div></div><button class="btn btn-ghost" data-spot="${spot.id}" data-agree="">Не согласен</button><button class="btn btn-primary" data-spot="${spot.id}" data-agree="1">Согласен</button></div>`
+    ? `<div class="spot">${ic("help", "c-acc i-lg")}<div><b>Выборочная проверка.</b> Согласны, что ${cname(spot.id)} не подходит на «${esc(spot.title)}»? Причина: ${esc(whyShort(spot.why))}.<div class="lbl">Часть откликов из «явно не подходят» система показывает вам отдельно.</div></div><button class="btn btn-ghost" data-spot="${spot.id}" data-agree="">Не согласен</button><button class="btn btn-primary" data-spot="${spot.id}" data-agree="1">Согласен</button></div>`
     : "";
   h += `<div class="card rank">${
     rows
       .map(
         (r) =>
-          `<label class="trow"><input type="checkbox" checked data-pickrow="${r.id}"><span class="tile round ${fit ? "t-ok" : "t-bad"}">${ic("user")}</span><span><b>${esc(cname(r.id))}</b><div class="rs">${ic(fit ? "check" : "x", "i-sm")} ${esc(whyShort(r.why))}</div></span><span class="num"><b>${num(r.score)}</b> <span class="lbl" style="display:inline">${num(r.low)}–${num(r.high)}</span></span><span class="rs">${esc(r.title)}</span></label>`,
+          `<label class="trow"><input type="checkbox" checked data-pickrow="${r.id}"><span class="tile round ${fit ? "t-ok" : "t-bad"}">${ic("user")}</span><span><b>${cname(r.id)}</b><div class="rs">${ic(fit ? "check" : "x", "i-sm")} ${esc(whyShort(r.why))}</div></span><span class="num"><b>${num(r.score)}</b> <span class="lbl" style="display:inline">${num(r.low)}–${num(r.high)}</span></span><span class="rs">${esc(r.title)}</span></label>`,
       )
       .join("") || `<div class="stub" style="padding:16px">${ic("check", "c-full")}Пусто.</div>`
   }`;
@@ -597,9 +602,9 @@ async function decide(ids, a, vid) {
   try {
     await post("/api/triage/decide", { candidate_ids: ids, decision: a, vacancy_id: vid ?? null });
   } catch (e) {
-    return toast(`Решение не сохранено: ${esc(e.message)}`);
+    return toast(`Решение не сохранено: ${e.message}`);
   }
-  const who = ids.length === 1 ? esc(cname(ids[0])) : `${ids.length} ${plural(ids.length, "кандидат", "кандидата", "кандидатов")}`;
+  const who = ids.length === 1 ? nameText(ids[0]) : `${ids.length} ${plural(ids.length, "кандидат", "кандидата", "кандидатов")}`;
   toast(
     `${who} → ${PS[DEC2ST[a]][0]}`,
     async () => {
@@ -615,9 +620,9 @@ async function spotAnswer(id, agree) {
   try {
     await post("/api/triage/spot", { candidate_id: id, agree });
   } catch (e) {
-    return toast(`Ответ не сохранён: ${esc(e.message)}`);
+    return toast(`Ответ не сохранён: ${e.message}`);
   }
-  toast(agree ? `${esc(cname(id))}: отказ подтверждён проверкой` : `${esc(cname(id))} перенесён в «Нужно ваше решение»`);
+  toast(agree ? `${nameText(id)}: отказ подтверждён проверкой` : `${nameText(id)} перенесён в «Нужно ваше решение»`);
   renderTriage();
 }
 
@@ -646,8 +651,8 @@ async function openPack(vid, ids) {
     const ch = items.filter((x) => sel.has(x.id));
     const dis = ch.length ? "" : "disabled";
     d.querySelector(".sheet").innerHTML = `<h3>${ic("send", "c-acc i-lg")}Пакет для заказчика · ${esc(title)}</h3>
-     <div class="picks">${items.map((x) => `<label class="pick"><input type="checkbox" ${sel.has(x.id) ? "checked" : ""} data-ppick="${x.id}">${esc(cname(x.id))} <b class="num">${num(x.v.score.score)}</b></label>`).join("")}<label class="switch" style="margin-left:auto">ФИО в документе <button class="tog" role="switch" aria-checked="${st.packNames}" data-pnames aria-label="ФИО в документе"></button></label></div>
-     ${ch.length ? `<table class="cmp"><thead><tr><th>Обязательные требования</th>${ch.map((x) => `<th class="c">${esc(cname(x.id))}</th>`).join("")}</tr></thead><tbody>${musts.map((r) => `<tr><td>${esc(r.text)}</td>${ch.map((x) => cell(x, r.id)).join("")}</tr>`).join("")}</tbody></table>` : `<div class="stub">${ic("help")}Отметьте хотя бы одного кандидата.</div>`}
+     <div class="picks">${items.map((x) => `<label class="pick"><input type="checkbox" ${sel.has(x.id) ? "checked" : ""} data-ppick="${x.id}">${cname(x.id)} <b class="num">${num(x.v.score.score)}</b></label>`).join("")}<label class="switch" style="margin-left:auto">ФИО в документе <button class="tog" role="switch" aria-checked="${st.packNames}" data-pnames aria-label="ФИО в документе"></button></label></div>
+     ${ch.length ? `<table class="cmp"><thead><tr><th>Обязательные требования</th>${ch.map((x) => `<th class="c">${cname(x.id)}</th>`).join("")}</tr></thead><tbody>${musts.map((r) => `<tr><td>${esc(r.text)}</td>${ch.map((x) => cell(x, r.id)).join("")}</tr>`).join("")}</tbody></table>` : `<div class="stub">${ic("help")}Отметьте хотя бы одного кандидата.</div>`}
      <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("file", "i-sm")}В документе: эта таблица, по каждому кандидату — «Кратко», риски и вопросы на собеседование. После скачивания DOCX кандидаты получат статус «у заказчика».</div>
      <div class="actions"><button class="btn btn-ghost" data-pclose>Отмена</button><button class="btn btn-ghost" data-pmail ${dis}>${ic("copy", "i-sm")}Текст письма</button><button class="btn btn-ghost" data-ppdf ${dis}>${ic("download", "i-sm")}PDF</button><button class="btn btn-primary" data-pdocx ${dis}>${ic("download", "i-sm")}Скачать DOCX</button></div>`;
   };
@@ -683,7 +688,7 @@ async function openPack(vid, ids) {
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       } catch (err) {
-        return toast(`Пакет не собран: ${esc(err.message)}`);
+        return toast(`Пакет не собран: ${err.message}`);
       }
       modal("pack", null);
       view.base = null;
@@ -721,7 +726,7 @@ async function openReply(cid) {
   const draw = () => {
     d.querySelector(".sheet").innerHTML = `<h3>${ic("send", "c-acc i-lg")}Ответ: ${cname(cid)}</h3>${
       cur
-        ? `<div class="seg">${ls.map((l) => `<button aria-pressed="${l === cur}" data-rkind="${esc(l.kind)}">${LETTER[l.kind] ?? esc(l.kind)}</button>`).join("")}</div>
+        ? `<div class="seg">${ls.map((l) => `<button aria-pressed="${l === cur}" data-rkind="${esc(l.kind)}">${esc(LETTER[l.kind] ?? l.kind)}</button>`).join("")}</div>
        <label class="fld"><span>Тема</span><input value="МФТИ: ваш отклик на «${esc(v.title)}»" aria-label="Тема"></label>
        <textarea class="ed" aria-label="Текст письма" id="replytext">${esc(cur.text)}</textarea>
        <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("shield", "c-full i-sm")}Текст собран из таблицы требований, его можно править. Смена шаблона заменит текст.</div>
@@ -738,10 +743,10 @@ async function openReply(cid) {
       try {
         await post(`/api/candidates/${cid}/reply-sent`, { template: cur.kind, vacancy_id: v.id });
       } catch (err) {
-        return toast(`Не отмечено: ${esc(err.message)}`);
+        return toast(`Не отмечено: ${err.message}`);
       }
       modal("sheet", null);
-      toast(`${esc(cname(cid))}: отмечено — ответ отправлен`);
+      toast(`${nameText(cid)}: отмечено — ответ отправлен`);
       render();
     }
   });
@@ -773,17 +778,17 @@ async function confirmed(kind) {
       const prev = c.status;
       await setStatus(c.id, "reserve");
       render();
-      toast(`${cname(c.id)} в резерве`, async () => {
+      toast(`${nameText(c.id)} в резерве`, async () => {
         await setStatus(c.id, prev);
         render();
       }, ["Открыть резерв", () => { st.flt = "reserve"; go(`#/candidates/${c.id}`); }]);
     } else {
       await api(`/api/candidates/${c.id}`, { method: "DELETE" });
-      toast(`${cname(c.id)} удалён со всеми данными`);
+      toast(`${nameText(c.id)} удалён со всеми данными`);
       go("#/candidates");
     }
   } catch (e) {
-    toast(`Не получилось: ${esc(e.message)}`);
+    toast(`Не получилось: ${e.message}`);
   }
 }
 
@@ -832,7 +837,7 @@ async function openUpload() {
       toast("Файлы в очереди — прогресс в «Кандидатах»");
     } catch (err) {
       e.target.disabled = false;
-      toast(`Загрузка не принята: ${esc(err.message)}`);
+      toast(`Загрузка не принята: ${err.message}`);
     }
   });
   try {
@@ -848,9 +853,9 @@ async function managerDecide(kind) {
   try {
     await post(`/api/candidates/${c.id}/manager-decision`, { decision: kind, comment: $("#mgrnote")?.value.trim() ?? "" });
   } catch (e) {
-    return toast(`Решение не сохранено: ${esc(e.message)}`);
+    return toast(`Решение не сохранено: ${e.message}`);
   }
-  toast(`${esc(cname(c.id))}: ${kind === "invite" ? "пригласить на интервью" : "не подходит"} — рекрутер увидит решение`);
+  toast(`${nameText(c.id)}: ${kind === "invite" ? "пригласить на интервью" : "не подходит"} — рекрутер увидит решение`);
   view.base = null;
   go("#/candidates");
 }
@@ -862,9 +867,9 @@ async function duplicate(merge) {
     if (merge) await post(`/api/candidates/${keep}/merge`, { other: c.id });
     else await post(`/api/candidates/${c.id}/dismiss-duplicate`);
   } catch (e) {
-    return toast(`Не получилось: ${esc(e.message)}`);
+    return toast(`Не получилось: ${e.message}`);
   }
-  toast(merge ? `Карточки объединены в ${esc(cname(keep))}` : "Отмечено: разные люди");
+  toast(merge ? `Карточки объединены в ${nameText(keep)}` : "Отмечено: разные люди");
   view.base = null;
   go(`#/candidates/${merge ? keep : c.id}`);
 }
@@ -907,14 +912,16 @@ async function login(body) {
 
 let toastTimer;
 let toastAct = {};
-function toast(html, undo, goTo) {
+function toast(text, undo, goTo) {
   $("#toast")?.remove();
   clearTimeout(toastTimer);
   const d = document.createElement("div");
   d.id = "toast";
   d.className = "toast";
   d.setAttribute("role", "status");
-  d.innerHTML = `<span>${html}</span>${goTo ? `<button data-tgo>${goTo[0]}</button>` : ""}${undo ? "<button data-undo>Отменить</button>" : ""}`;
+  d.innerHTML = `<span></span>${goTo ? `<button data-tgo>${goTo[0]}</button>` : ""}${undo ? "<button data-undo>Отменить</button>" : ""}`;
+  const span = d.firstChild;
+  span.textContent = text; // текст тоста — только текстом: в нём ФИО и ошибки сервера
   document.body.appendChild(d);
   toastAct = { undo, go: goTo?.[1] };
   toastTimer = setTimeout(() => d.remove(), 6000);
@@ -957,7 +964,7 @@ document.addEventListener("click", async (e) => {
     if (!rows.length) return toast("Отметьте хотя бы одного кандидата");
     const vid = rows[0].vacancy_id;
     const same = rows.filter((r) => r.vacancy_id === vid);
-    if (same.length < rows.length) toast(`Пакет — по «${esc(rows[0].title)}». Остальных отправьте отдельным пакетом по их вакансии.`);
+    if (same.length < rows.length) toast(`Пакет — по «${rows[0].title}». Остальных отправьте отдельным пакетом по их вакансии.`);
     openPack(vid, same.map((r) => r.id));
   } else if ((el = on("[data-pack]"))) openPack(el.dataset.pack, el.dataset.ids.split(",").map(Number));
   else if (on("[data-pclose]") || t.id === "pack") modal("pack", null);

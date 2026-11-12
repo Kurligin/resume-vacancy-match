@@ -164,6 +164,7 @@ def router(db: Path) -> APIRouter:
             who=user.who,
             vacancy_id=body.vacancy_id,
             package=True,
+            names=body.names,
         )
         return out
 

@@ -50,6 +50,12 @@ MAX_BATCH = 300  # файлов в одной пачке
 MAX_REQUEST_BYTES = 200 * 2**20  # распакованный объём одного запроса на загрузку
 OPEN_PATHS = {"/api/health", "/api/login", "/api/login-options"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# скрипты — только свои файлы; inline-стили в разметке интерфейса допустимы
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+    "form-action 'self'"
+)
 log = logging.getLogger("rvm.api")
 STATIC = Path(__file__).parent / "static"
 _SKIP_IN_ZIP = ("__MACOSX", ".")  # служебные папки macOS и скрытые файлы
@@ -192,6 +198,12 @@ def _zip_name(info: zipfile.ZipInfo) -> str:
     return info.filename.encode("cp437").decode("cp866", errors="replace")
 
 
+def names_sent(card: dict[str, Any]) -> bool:
+    """Последний пакет заказчику ушёл с флагом «ФИО в документе»."""
+    packs = [e["details"] for e in card["events"] if e["details"].get("package")]
+    return bool(packs and packs[-1].get("names"))
+
+
 def _too_big() -> HTTPException:
     return HTTPException(413, f"в запросе больше {MAX_REQUEST_BYTES // 2**20} МБ")
 
@@ -283,8 +295,7 @@ def create_app(
         "рейтинг, выводы. Модель читает, код решает.",
     )
 
-    @app.middleware("http")
-    async def guard(request: Request, call_next: Any) -> Any:
+    async def check(request: Request, call_next: Any) -> Any:
         path = request.url.path
         if path.startswith("/api/"):
             if request.method not in SAFE_METHODS and not request.headers.get("x-requested-with"):
@@ -293,6 +304,12 @@ def create_app(
             if request.state.user is None and path not in OPEN_PATHS:
                 return JSONResponse({"detail": "нужен вход"}, 401)
         return await call_next(request)
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next: Any) -> Any:
+        response = await check(request, call_next)
+        response.headers["Content-Security-Policy"] = CSP
+        return response
 
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)  # снаружи guard
 
@@ -352,9 +369,10 @@ def create_app(
         out = {}
         for cid, c in store.summaries(db, ids).items():
             created = date.fromisoformat(c["created_at"][:10])
+            named = pii if user.role == "recruiter" else names_sent(store.card(db, cid))
             out[cid] = Flow(
                 **c,
-                name=store.full_name(db, cid) if pii and user.role == "recruiter" else None,
+                name=store.full_name(db, cid) if named else None,
                 waiting_days=(now() - created).days if c["waiting"] else None,
             )
         return out
@@ -372,14 +390,24 @@ def create_app(
         return HTTPException(404, str(e.args[0]) if e.args else "не найдено")
 
     def visible_card(user: auth.User, candidate_id: int) -> dict[str, Any]:
-        """Карточка; руководителю — только кандидаты «у заказчика»."""
+        """Карточка; руководителю — только кандидаты «у заказчика», без имён файлов без флага ФИО."""
         try:
             c = store.card(db, candidate_id)
         except KeyError as e:
             raise not_found(e) from e
-        if user.role == "manager" and c["status"] != CandidateStatus.CUST:
-            raise HTTPException(404, f"нет кандидата {candidate_id}")
+        if user.role == "manager":
+            if c["status"] != CandidateStatus.CUST:
+                raise HTTPException(404, f"нет кандидата {candidate_id}")
+            if not names_sent(c):  # в имени файла часто ФИО
+                c["versions"] = [{**v, "name": ""} for v in c["versions"]]
         return c
+
+    def shown(user: auth.User, c: dict[str, Any], resume: ResumeView) -> ResumeView:
+        """Руководителю — только обезличенные строки; имя файла — из карточки (см. visible_card)."""
+        if user.role != "manager":
+            return resume
+        name = resume.name if names_sent(c) else ""
+        return resume.model_copy(update={"original": resume.lines, "name": name})
 
     # --- вход ---
 
@@ -606,25 +634,29 @@ def create_app(
         "переадресация, факты, исходный текст для показа.",
     )
     def evaluations(candidate: int, user: Anyone) -> Report:
+        c = visible_card(user, candidate)
         try:
-            rid = visible_card(user, candidate)["versions"][0]["id"]
+            rid = c["versions"][0]["id"]
         except IndexError as e:
             raise HTTPException(404, "нет кандидата или резюме") from e
-        return report_of(rid)
+        report = report_of(rid)
+        return report.model_copy(update={"resume": shown(user, c, report.resume)})
 
     @app.get("/api/evaluations/{resume_id}/{vacancy_id}", summary="Отчёт по паре")
     def pair(resume_id: int, vacancy_id: str, user: Anyone) -> Pair:
-        if user.role == "manager" and resume_id not in {
-            v["id"]
-            for c in store.list_candidates(db, CandidateStatus.CUST)
-            for v in store.card(db, c["id"])["versions"]
-        }:
-            raise HTTPException(404, f"нет резюме {resume_id}")
+        c: dict[str, Any] = {}
+        if user.role == "manager":
+            cards = (
+                store.card(db, x["id"]) for x in store.list_candidates(db, CandidateStatus.CUST)
+            )
+            c = next((x for x in cards if any(v["id"] == resume_id for v in x["versions"])), {})
+            if not c:
+                raise HTTPException(404, f"нет резюме {resume_id}")
         report = report_of(resume_id)
         result = next((v for v in report.vacancies if v.id == vacancy_id), None)
         if result is None:
             raise HTTPException(404, f"нет оценки по вакансии {vacancy_id}")
-        return Pair(resume=report.resume, result=result)
+        return Pair(resume=shown(user, c, report.resume), result=result)
 
     @app.patch(
         "/api/evaluations/{resume_id}/{vacancy_id}/rows/{requirement_id}",
