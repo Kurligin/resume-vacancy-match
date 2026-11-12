@@ -277,6 +277,12 @@ def test_short_quote_rejected() -> None:
     assert quote_ok(line, "Vue 3")
 
 
+def test_short_quote_of_known_skill() -> None:
+    assert quote_ok(Line(n=1, text="Уверенное владение 1С:Предприятие"), "1С")
+    assert quote_ok(Line(n=1, text="Бэкенд на Go и Python"), "Go")
+    assert not quote_ok(Line(n=1, text="Пишу на Golang"), "Go")  # короткая — только точно
+
+
 def test_evidence_quote_is_line_text() -> None:
     ev = check(DOC, FACTS, 6, "разработка на vue 3 и nuxt 3 (ssr)")
     assert ev and ev.quote == "Разработка на Vue 3 и Nuxt 3 (SSR)"
