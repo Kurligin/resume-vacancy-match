@@ -156,7 +156,7 @@ async function renderBase(r) {
   if (st.batch && !poll) startPoll();
   const sel = r.id ?? view.base.list[0]?.id;
   if (sel != null) renderCard(sel);
-  else $("#doc").innerHTML = `<div class="stub" style="padding:18px">${ic("users")}Загрузите резюме — карточка кандидата появится здесь.</div>`;
+  else $("#doc").innerHTML = mgr() ? "" : `<div class="stub" style="padding:18px">${ic("users")}Загрузите резюме — карточка кандидата появится здесь.</div>`;
   $("#navbadge").textContent = mgr() ? view.base.list.length || "" : view.base.stats.waiting || "";
 }
 
@@ -186,7 +186,7 @@ function topBase() {
   h += `<div class="card rank"><div class="tools"><label class="search">${ic("search", "i-sm")}<input id="q" type="search" value="${esc(st.q)}" placeholder="Навык, должность…" aria-label="Поиск"></label><div class="chips">
     ${FILTERS.filter(([k]) => !mgr() || k === "cust").map(([k, t]) => `<button class="chip" aria-pressed="${st.flt === k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join("")}</div></div>`;
   if (!rows.length)
-    h += `<div class="stub" style="padding:18px">${ic("search")}${list.length || st.q ? "Никого не нашлось — измените поиск или фильтр." : "В базе пока пусто. Нажмите «Загрузить»."}</div>`;
+    h += `<div class="stub" style="padding:18px">${ic("search")}${list.length || st.q ? "Никого не нашлось — измените поиск или фильтр." : mgr() ? "Рекрутер ещё не передал вам кандидатов." : "В базе пока пусто. Нажмите «Загрузить»."}</div>`;
   h += rows
     .map(
       (c) => `<button class="crow" aria-selected="${c.id === sel}" data-href="#/candidates/${c.id}">

@@ -335,6 +335,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 
 /* Текст резюме */
 .doc{position:sticky;top:80px;max-height:calc(100vh - 104px);overflow:auto;padding:14px 0;align-self:start}
+.doc:empty{display:none} /* пустая боковая карточка (ошибка, 404) — не белая полоса */
 .doc h2{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);padding:0 18px 8px}
 .blk{font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;padding:12px 18px 4px}
 .ln{display:grid;grid-template-columns:30px 1fr;gap:6px;padding:3px 18px;font-size:13px;line-height:1.45;transition:background .35s var(--spring)}
