@@ -12,6 +12,7 @@ class Verdict(StrEnum):
     FIT = "fit"  # подходит
     PARTIAL = "partial"  # частично
     NO_FIT = "no_fit"  # не подходит
+    NO_DATA = "no_data"  # суммарный вес 0: нет требований или одни условия
 
 
 class Contribution(BaseModel):
@@ -38,7 +39,10 @@ class PairScore(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def verdict(self) -> Verdict:
-        if self.score >= config.FIT_FROM:
+        """Блокер ограничивает вердикт уровнем «частично»."""
+        if not sum(c.weight for c in self.contributions):
+            return Verdict.NO_DATA
+        if self.score >= config.FIT_FROM and not self.blockers:
             return Verdict.FIT
         return Verdict.PARTIAL if self.score >= config.PARTIAL_FROM else Verdict.NO_FIT
 
