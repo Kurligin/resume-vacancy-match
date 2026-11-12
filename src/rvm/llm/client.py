@@ -19,6 +19,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
 Messages = list[dict[str, str]]
+DEMO_MODEL = "демо-модель, без ИИ: для живой оценки задайте ключ"
 
 
 class LLMError(RuntimeError):
@@ -30,7 +31,7 @@ class LLMTruncated(LLMError):
 
 
 class DemoCacheMiss(LLMError):
-    """demo-режим: ответа нет в кэше, а вызывать модель нельзя."""
+    """demo-режим без демо-модели: ответа нет в кэше, а вызывать модель нельзя."""
 
 
 class LLMClient:
@@ -63,7 +64,8 @@ class LLMClient:
             self._sql("ALTER TABLE cache ADD COLUMN created REAL")  # кэш старой схемы
         except sqlite3.OperationalError:
             pass
-        self._client = client
+        self._client = client  # в demo — демо-модель на промахи кэша (None — промах = ошибка)
+        self.demo_calls = 0  # сколько ответов дала демо-модель
         if client is None and self.mode == "live":
             self._client = openai.OpenAI(
                 base_url=self.base_url or None, api_key=api_key or env.get("LLM_API_KEY")
@@ -86,7 +88,9 @@ class LLMClient:
         if rows:
             return schema.model_validate_json(rows[0][0])
         if self.mode == "demo":
-            raise DemoCacheMiss(f"нет в кэше: {schema.__name__}, {prompt_version}")
+            if self._client is None:
+                raise DemoCacheMiss(f"нет в кэше: {schema.__name__}, {prompt_version}")
+            self.demo_calls += 1
 
         convo = list(messages)
         for attempt in range(2):
@@ -105,6 +109,8 @@ class LLMClient:
                     },
                 ]
                 continue
+            if self.mode == "demo":
+                return result  # ответы демо-модели в кэш живых ответов не пишем
             self._sql(
                 "INSERT OR REPLACE INTO cache (key, value, created) VALUES (?, ?, ?)",
                 (key, result.model_dump_json(), time.time()),

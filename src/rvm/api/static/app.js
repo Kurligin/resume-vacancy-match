@@ -335,6 +335,7 @@ function topCand(vac) {
     <div class="sub">${report.applied ? `<span>${ic("inbox", "i-sm")}отклик на «${esc(title(report.applied))}»${report.applied_guessed ? " · определён по письму" : ""}</span>` : ""}${st.pii && file ? `<span>${ic("file", "i-sm")}${esc(file)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(card.created_at)}</span></div></div>
     <div class="side"><span style="display:flex;gap:8px"><a class="btn btn-ghost" href="#/candidates/${id}">${ic("hist", "i-sm")}Карточка и история</a>${mgr() ? "" : `<button class="btn btn-ghost" data-reply="${id}">${ic("send", "i-sm")}Ответить</button>${vac ? `<button class="btn btn-ghost" data-pack="${esc(vac.id)}" data-ids="${id}">${ic("send", "i-sm")}Для заказчика</button>` : ""}`}</span>${mgr() ? "" : piiTog()}</div></div>`;
   if (!vac) return h;
+  if (report.model.startsWith("демо-модель")) h += `<div class="callout"><span class="ico">${ic("alert")}</span><div><b>${esc(report.model)}</b></div></div>`;
   const rd = report.redirect;
   if (rd) {
     const s = (vid) => num(report.vacancies.find((v) => v.id === vid)?.score.score);
@@ -899,8 +900,8 @@ async function confirmed(kind) {
         render();
       }, ["Открыть резерв", () => { st.flt = "reserve"; go(`#/candidates/${c.id}`); }]);
     } else {
-      await api(`/api/candidates/${c.id}`, { method: "DELETE" });
-      toast(`${nameText(c.id)} удалён со всеми данными`);
+      const del = await api(`/api/candidates/${c.id}`, { method: "DELETE" });
+      toast(`${nameText(c.id)} удалён со всеми данными${del?.warning ? ` (${del.warning})` : ""}`);
       go("#/candidates");
     }
   } catch (e) {

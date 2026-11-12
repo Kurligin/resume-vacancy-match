@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from rvm.experience import check_declared, snapshot_note, total_months
 from rvm.facts import Discrepancy, ResumeFacts
 from rvm.llm import LLMClient, LLMError, LLMTruncated
+from rvm.llm.client import DEMO_MODEL
 from rvm.models import Document, FileStatus, Line, MatchRow, Requirement, Status
 from rvm.pipeline import explain as explain_mod
 from rvm.pipeline import extract_resume, extract_vacancy
@@ -174,6 +175,9 @@ def analyze(
     source_name: str | None = None,
 ) -> Report:
     t0 = time.time()
+    # shortcut: счётчик общий на клиент — параллельный разбор другого файла демо-моделью тоже
+    # пометит отчёт; пометка лишь осторожнее, чем надо
+    demo_before = llm.demo_calls
     warnings = [f"{resume.name}: {w}" for w in resume.warnings]
     applied_guessed = applied is None
     if applied is None:
@@ -291,6 +295,9 @@ def analyze(
     with ThreadPoolExecutor(workers) as pool:
         ordered = list(pool.map(finish, ranking.places))
     warnings += facts.warnings
+    if llm.demo_calls != demo_before:
+        base["model"] = DEMO_MODEL
+        warnings.append(DEMO_MODEL)
     return Report(
         status=ReportStatus.OK,
         vacancies=ordered,
