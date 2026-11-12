@@ -1,0 +1,286 @@
+# Эталон ожиданий по данным кейса: 4 резюме × 3 вакансии.
+# Это наша ручная разметка, а не разметка организаторов. Файлы кейса в git не лежат:
+# эталон ссылается на них по имени внутри папки --data.
+#
+# Требование: key — ключ эталона; section — ожидаемый раздел (must/nice/inferred/condition),
+# section_alt — допустимые иные разделы; variants — формулировки для нечёткого сопоставления
+# с извлечёнными требованиями.
+# Статус: s — ожидаемый (full/partial/"no"/unknown; no в кавычках, иначе YAML прочтёт false),
+# alt — допустимые альтернативы,
+# why — обоснование со ссылкой на фразу, review: true — решение без опоры на ручной разбор,
+# его нужно проверить.
+# Резюме: order — ожидаемый порядок вакансий; redirect — ожидаемая переадресация (null — нет);
+# discrepancy — ждём расхождение заявленного стажа (null — не проверяем);
+# snapshot_note — подстрока пометки «резюме, похоже, от …» (null — не проверяем).
+
+today: 2026-10-15  # review: дата, на которую написаны резюме кейса (стаж Иванова «2 года 10 мес»)
+
+vacancies:
+  v1:
+    file: Вакансия 1.docx
+    requirements:
+      - {key: exp_1y, section: must, text: "Опыт работы от 1 года",
+         variants: ["опыт работы от 1 года", "опыт работы от года"]}
+      - {key: html, section: must, text: "Уверенное знание HTML5 и принципов семантической верстки",
+         variants: ["знание HTML5 и семантической верстки", "HTML5 семантическая верстка"]}
+      - {key: css, section: must, text: "Хорошее знание CSS3: Flexbox, Grid, адаптивная верстка, позиционирование, псевдоклассы и анимации",
+         variants: ["знание CSS3 Flexbox Grid", "CSS3 Flexbox Grid адаптивная верстка анимации"]}
+      - {key: js, section: must, text: "JavaScript (ES6+): работа с DOM, события, fetch/axios, промисы, асинхронность, обработка ошибок",
+         variants: ["JavaScript ES6+ DOM промисы асинхронность", "знание JavaScript ES6"]}
+      - {key: tailwind, section: must, text: "Практический опыт работы с Tailwind CSS: конфигурация, брейкпоинты, кастомизация темы",
+         variants: ["опыт работы с Tailwind CSS", "Tailwind CSS конфигурация брейкпоинты тема"]}
+      - {key: vue, section: must, text: "Опыт коммерческой разработки на Vue.js: компоненты, пропсы, emit, v-model",
+         variants: ["коммерческая разработка на Vue.js", "опыт коммерческой разработки Vue"]}
+      - {key: testing, section: must, text: "Навыки самостоятельного тестирования реализованных интерфейсов",
+         variants: ["самостоятельное тестирование интерфейсов", "тестирование интерфейсов"]}
+      - {key: clean_code, section: must, text: "Аккуратность в коде (читаемость)",
+         variants: ["аккуратность в коде", "читаемость кода"]}
+      - {key: team, section: must, text: "Готовность работать в небольшой команде",
+         variants: ["работа в небольшой команде", "готовность работать в команде"]}
+      - {key: ssr, section: nice, text: "Понимание разницы между SSR и SPA",
+         variants: ["понимание SSR и SPA", "разница SSR SPA"]}
+      - {key: pinia_nuxt, section: nice, text: "Опыт работы с Pinia, Nuxt, Monaco Editor",
+         variants: ["Pinia Nuxt Monaco Editor", "опыт работы с Pinia", "опыт работы с Nuxt"]}
+      - {key: figma, section: nice, text: "Знание Figma (работа с макетом, экспорт ресурсов)",
+         variants: ["знание Figma", "Figma работа с макетом экспорт ресурсов"]}
+      - {key: letter, section: nice, section_alt: [must, condition], review: true,
+         text: "В сопроводительном письме указать, где использовался Vue.js, подходит ли офис и сколько займёт дорога",
+         variants: ["сопроводительное письмо проекты на Vue.js", "указать в письме опыт Vue.js и время дороги до офиса"]}
+      - {key: layout, section: inferred, review: true, text: "Верстка макетов Figma на HTML/CSS/JS с нуля и поддержка существующих страниц",
+         variants: ["верстка макетов Figma на HTML CSS JS", "верстка макетов с нуля"]}
+      - {key: adaptive, section: inferred, review: true, text: "Адаптивная и кроссбраузерная верстка",
+         variants: ["адаптивная кроссбраузерная верстка"]}
+      - {key: office, section: condition, review: true, text: "Работа в Долгопрудном, гибрид, график 5/2",
+         variants: ["Долгопрудный гибрид 5/2", "офис в Долгопрудном", "гибридный формат работы"]}
+  v2:
+    file: Вакансия 2.docx
+    requirements:
+      - {key: edu_econ, section: must, text: "Образование: высшее экономическое",
+         variants: ["высшее экономическое образование"]}
+      - {key: exp_3y, section: must, text: "Подтверждённый опыт не менее 3 лет: бухгалтер по учёту ОС и ТМЦ, складской учёт, инвентаризация",
+         variants: ["опыт не менее 3 лет бухгалтер по учету ОС и ТМЦ", "опыт учета ОС и ТМЦ складского учета инвентаризации"]}
+      - {key: qualities, section: must, text: "Внимание к деталям, системность, концентрация при монотонной работе, коммуникабельность, стрессоустойчивость",
+         variants: ["внимание к деталям системность", "коммуникабельность стрессоустойчивость", "концентрация при длительной монотонной работе"]}
+      - {key: inventory, section: inferred, text: "Инвентаризация основных средств",
+         variants: ["инвентаризация ОС", "опыт инвентаризации"]}
+      - {key: docs_move, section: inferred, text: "Оформление документов на перемещение и списание ОС",
+         variants: ["документы на перемещение ОС", "пакет документов на списание и перемещение ОС"]}
+      - {key: os_accounting, section: inferred, review: true, text: "Ведение учёта ОС: таблица поступления и выдачи, учёт по кабинетам и подразделениям",
+         variants: ["учет ОС по кабинетам и подразделениям", "ведение таблицы поступления и выдачи ОС"]}
+      - {key: grants, section: inferred, review: true, text: "Контроль поступления ОС по субсидиям и грантам, перемещение на сч. 12",
+         variants: ["ОС по субсидиям и грантам", "контроль поступления ОС по субсидиям"]}
+      - {key: office, section: condition, review: true, text: "Офис в Долгопрудном, график 5/2",
+         variants: ["офис Долгопрудный 5/2", "работа в офисе в Долгопрудном"]}
+  v3:
+    file: Вакансия 3.docx
+    requirements:
+      - {key: communication, section: must, text: "Развитые коммуникативные навыки",
+         variants: ["коммуникативные навыки"]}
+      - {key: responsibility, section: must, text: "Высокий уровень ответственности и самоорганизации",
+         variants: ["ответственность и самоорганизация"]}
+      - {key: tables, section: must, text: "Уверенные навыки работы с таблицами и большим объёмом информации",
+         variants: ["работа с таблицами и большим объемом информации", "Excel Google Sheets"]}
+      - {key: laptop, section: must, section_alt: [condition], text: "Наличие личного ноутбука или ПК (при дистанционном формате)",
+         variants: ["личный ноутбук или ПК", "наличие ноутбука"]}
+      - {key: interaction, section: must, text: "Готовность к регулярному взаимодействию с образовательными организациями и командой проекта",
+         variants: ["взаимодействие с образовательными организациями и командой"]}
+      - {key: edu_gov, section: nice, text: "Опыт работы в сфере образования, государственных или муниципальных структурах",
+         variants: ["опыт в сфере образования", "опыт в государственных или муниципальных структурах"]}
+      - {key: clerk, section: nice, text: "Опыт работы делопроизводителем или документоведом",
+         variants: ["опыт делопроизводителя или документоведа", "делопроизводство"]}
+      - {key: onsite, section: nice, section_alt: [condition], text: "Готовность к очному формату работы",
+         variants: ["очный формат работы"]}
+      - {key: orgs, section: inferred, review: true, text: "Коммуникация с образовательными организациями: сопровождение 30–40 организаций",
+         variants: ["сопровождение 30-40 образовательных организаций", "коммуникация с образовательными организациями"]}
+      - {key: docs_check, section: inferred, review: true, text: "Проверка и контроль комплектности договорных и расчётных документов",
+         variants: ["контроль комплектности документов", "проверка комплектности договорных документов"]}
+      - {key: stats, section: inferred, review: true, text: "Сбор статистических данных для отчётности",
+         variants: ["сбор статистических данных для отчетности"]}
+      - {key: office, section: condition, review: true, text: "Работа в Долгопрудном, 5/2, срочный трудовой договор",
+         variants: ["Долгопрудный 5/2", "срочный трудовой договор"]}
+
+resumes:
+  - label: Резюме 1
+    file: Иванов Алексей_резюме 1.docx
+    order: [v3, v1, v2]
+    redirect: {from: v1, to: v3}
+    discrepancy: null
+    snapshot_note: null
+    statuses:
+      v1:
+        exp_1y: {s: partial, alt: [full, unknown], why: "свои проекты с янв 2024, не найм"}
+        html: {s: unknown, alt: [partial], why: "только «вёрстка на HTML и CSS», о семантике ни слова"}
+        css: {s: unknown, alt: [partial], why: "Flexbox и Grid не упомянуты"}
+        js: {s: full, alt: [partial], why: "«работа с запросами, промисами и обработкой ошибок на фронте — моя»"}
+        tailwind: {s: "no", why: "«с Tailwind тоже пока не работал»"}
+        vue: {s: "no", why: "«коммерческих проектов на нём у меня нет»"}
+        testing: {s: partial, alt: [unknown], review: true, why: "ручная проверка в браузере, без тестов"}
+        clean_code: {s: unknown, alt: [partial], review: true, why: "о качестве кода не пишет"}
+        team: {s: unknown, alt: [partial], review: true, why: "работает один; «был на рабочих статусах команды» на практике"}
+        ssr: {s: unknown, why: "не указано"}
+        pinia_nuxt: {s: unknown, why: "не указано"}
+        figma: {s: unknown, why: "не указано"}
+        letter: {s: partial, alt: [full], review: true, why: "про Vue ответил, про офис и дорогу нет"}
+        layout: {s: partial, alt: [unknown], review: true, why: "«вёрстка на HTML и CSS», без макетов Figma"}
+        adaptive: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«Формат работы: Удалённо, Гибрид»; дорога «не имеет значения»"}
+      v2:
+        edu_econ: {s: "no", alt: [partial, unknown], why: "«Неоконченное высшее», менеджмент"}
+        exp_3y: {s: unknown, alt: ["no"], why: "учёта ОС и ТМЦ в опыте нет"}
+        qualities: {s: partial, alt: [unknown], review: true, why: "«Внимательность к деталям» — самоописание"}
+        inventory: {s: unknown, why: "не указано"}
+        docs_move: {s: unknown, alt: [partial], review: true, why: "только «Документооборот» средним уровнем"}
+        os_accounting: {s: unknown, why: "не указано"}
+        grants: {s: unknown, why: "не указано"}
+        office: {s: partial, alt: ["no", unknown], review: true, why: "«Удалённо, Гибрид, Разъездная» — офис не назван"}
+      v3:
+        communication: {s: full, alt: [partial], why: "«Деловая переписка Деловая коммуникация», 50+ заказчиков"}
+        responsibility: {s: partial, alt: [full], why: "«контроль сроков по задачам», «сдача в срок» — самоописание"}
+        tables: {s: full, alt: [partial], why: "«Работа с большим объёмом информации», Excel и Google Sheets"}
+        laptop: {s: unknown, why: "не указано"}
+        interaction: {s: partial, alt: [full, unknown], review: true, why: "«согласование с заказчиком», переписка и согласования"}
+        edu_gov: {s: unknown, why: "не указано"}
+        clerk: {s: partial, alt: [unknown], why: "«Документооборот» средним уровнем"}
+        onsite: {s: partial, alt: [unknown, "no"], review: true, why: "«Удалённо, Гибрид, Разъездная»"}
+        orgs: {s: partial, alt: [full, unknown], review: true, why: "«Более 50 заказчиков»"}
+        docs_check: {s: partial, alt: [unknown], review: true, why: "проектная документация, но не проверка комплектности"}
+        stats: {s: full, alt: [partial], review: true, why: "«регулярная отчётность», сбор данных"}
+        office: {s: partial, alt: [full, unknown], review: true, why: "гибрид, дорога «не имеет значения»"}
+  - label: Резюме 2
+    file: Петров Иван_резюме 2.docx
+    order: [v1, v3, v2]  # review: место В2 и В3 разбор не задаёт
+    redirect: null
+    discrepancy: false
+    snapshot_note: null
+    statuses:
+      v1:
+        exp_1y: {s: full, why: "«Опыт работы —7 лет 9 месяцев» frontend"}
+        html: {s: partial, alt: [full], review: true, why: "HTML в стеке, о семантике не пишет"}
+        css: {s: partial, alt: [full], review: true, why: "«Адаптивная вёрстка Pixel Perfect», анимации; Flexbox/Grid не названы"}
+        js: {s: full, alt: [partial], review: true, why: "«чистой JS-логики», REST API"}
+        tailwind: {s: full, why: "«Стилизация интерфейсов с использованием Tailwind CSS»"}
+        vue: {s: full, why: "Vue 2/3 в ООО Финансы и ООО Технолоджи"}
+        testing: {s: full, alt: [partial], review: true, why: "«Покрытие компонентов unit-тестами с использованием Vitest»"}
+        clean_code: {s: partial, alt: [full, unknown], review: true, why: "«надёжные, поддерживаемые решения», Code Review"}
+        team: {s: full, alt: [partial], review: true, why: "«Работа по методологии Agile в составе продуктовой команды»"}
+        ssr: {s: full, alt: [partial], why: "«Nuxt 3 (включая SSR)», SPA-продукты"}
+        pinia_nuxt: {s: partial, alt: [full], why: "Pinia и Nuxt есть, Monaco Editor не указан"}
+        figma: {s: full, why: "«Разработка новых страниц сайта банка по макетам Figma»"}
+        letter: {s: partial, alt: [full], review: true, why: "про Vue ответил, про офис и дорогу в письме нет"}
+        layout: {s: full, alt: [partial], why: "«Разработка сайтов с нуля по макетам из Figma»"}
+        adaptive: {s: full, alt: [partial], review: true, why: "«Адаптивная вёрстка», кроссбраузерность не названа"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«удалённо, гибрид, на месте работодателя»"}
+      v2:
+        edu_econ: {s: unknown, alt: [partial], why: "РГГУ, специальность не указана"}
+        exp_3y: {s: unknown, alt: ["no"], why: "учёта ОС нет"}
+        qualities: {s: unknown, alt: [partial], review: true, why: "качеств не перечисляет"}
+        inventory: {s: unknown, why: "не указано"}
+        docs_move: {s: unknown, why: "не указано"}
+        os_accounting: {s: unknown, why: "не указано"}
+        grants: {s: unknown, why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«на месте работодателя»"}
+      v3:
+        communication: {s: unknown, alt: [partial], review: true, why: "только работа в команде и с дизайнерами"}
+        responsibility: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        tables: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        laptop: {s: unknown, why: "не указано"}
+        interaction: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        edu_gov: {s: unknown, why: "не указано"}
+        clerk: {s: unknown, why: "не указано"}
+        onsite: {s: full, alt: [partial, unknown], review: true, why: "«на месте работодателя»"}
+        orgs: {s: unknown, why: "не указано"}
+        docs_check: {s: unknown, why: "не указано"}
+        stats: {s: unknown, why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«на месте работодателя», дорога не важна"}
+  - label: Резюме 3
+    file: Семенов Алексей _резюме 3.docx
+    order: [v1, v3, v2]  # review: место В2 и В3 разбор не задаёт
+    redirect: null
+    discrepancy: true
+    snapshot_note: "2025"  # «март 2023 — настоящее время (2 года)» → снимок весны 2025
+    statuses:
+      v1:
+        exp_1y: {s: full, why: "с сентября 2021 во frontend"}
+        html: {s: full, why: "«HTML5: семантическая верстка»"}
+        css: {s: full, why: "«CSS3: Flexbox, Grid, адаптивная и кроссбраузерная верстка»"}
+        js: {s: full, why: "«JavaScript (ES6+): работа с DOM и событиями, fetch/axios, промисы»"}
+        tailwind: {s: full, why: "«Tailwind CSS: … настройка конфига, адаптивные брейкпоинты, кастомизация темы»"}
+        vue: {s: full, why: "«Vue.js использовал в коммерческой разработке»"}
+        testing: {s: full, alt: [partial], why: "«базовые навыки тестирования интерфейсов»"}
+        clean_code: {s: full, alt: [partial], why: "«Аккуратный код: понятные имена»"}
+        team: {s: full, why: "«Готов работать в небольшой команде»"}
+        ssr: {s: full, alt: [partial], why: "«понимание различий SPA и SSR»"}
+        pinia_nuxt: {s: partial, alt: [full], why: "Pinia базово, Nuxt и Monaco не указаны"}
+        figma: {s: full, why: "«Figma (чтение макетов, экспорт ассетов)»"}
+        letter: {s: full, alt: [partial], why: "ответил про Vue и про дорогу «35-45 минут»"}
+        layout: {s: full, why: "«Верстка по макетам Figma»"}
+        adaptive: {s: full, why: "«адаптивная и кроссбраузерная верстка»"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«Долгопрудный удобен»"}
+      v2:
+        edu_econ: {s: "no", alt: [unknown, partial], review: true, why: "«Бакалавр, направление „Прикладная информатика“»"}
+        exp_3y: {s: unknown, alt: ["no"], why: "учёта ОС нет"}
+        qualities: {s: unknown, alt: [partial], review: true, why: "только аккуратность в коде"}
+        inventory: {s: unknown, why: "не указано"}
+        docs_move: {s: unknown, why: "не указано"}
+        os_accounting: {s: unknown, why: "не указано"}
+        grants: {s: unknown, why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«Долгопрудный удобен»"}
+      v3:
+        communication: {s: partial, alt: [unknown], review: true, why: "«согласование правок с дизайнером»"}
+        responsibility: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        tables: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        laptop: {s: unknown, why: "не указано"}
+        interaction: {s: partial, alt: [unknown], review: true, why: "«Готов работать в небольшой команде»"}
+        edu_gov: {s: partial, alt: [full, unknown], review: true, why: "ООО «Образовательные решения», лендинги для онлайн-курсов"}
+        clerk: {s: unknown, why: "не указано"}
+        onsite: {s: full, alt: [partial, unknown], review: true, why: "«Долгопрудный удобен»"}
+        orgs: {s: unknown, why: "не указано"}
+        docs_check: {s: unknown, why: "не указано"}
+        stats: {s: unknown, why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«Долгопрудный удобен»"}
+  - label: Резюме 4
+    file: Петрова Лилия_резюме 4.docx
+    order: [v2, v3, v1]
+    redirect: null
+    discrepancy: null
+    snapshot_note: null
+    statuses:
+      v1:
+        exp_1y: {s: unknown, alt: ["no", partial], review: true, why: "стаж бухгалтерский, frontend нет"}
+        html: {s: unknown, alt: ["no"], why: "не указано"}
+        css: {s: unknown, alt: ["no"], why: "не указано"}
+        js: {s: unknown, alt: ["no"], why: "не указано"}
+        tailwind: {s: unknown, alt: ["no"], why: "не указано"}
+        vue: {s: unknown, alt: ["no"], why: "не указано"}
+        testing: {s: unknown, alt: ["no"], why: "не указано"}
+        clean_code: {s: unknown, alt: ["no"], why: "не указано"}
+        team: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        ssr: {s: unknown, alt: ["no"], why: "не указано"}
+        pinia_nuxt: {s: unknown, alt: ["no"], why: "не указано"}
+        figma: {s: unknown, alt: ["no"], why: "не указано"}
+        letter: {s: unknown, alt: ["no"], review: true, why: "письмо про вакансию ОС"}
+        layout: {s: unknown, alt: ["no"], why: "не указано"}
+        adaptive: {s: unknown, alt: ["no"], why: "не указано"}
+        office: {s: full, alt: [partial, unknown], review: true, why: "«Проживаю в г. Долгопрудный»"}
+      v2:
+        edu_econ: {s: full, why: "«высшее, направление „Финансы и кредит“»"}
+        exp_3y: {s: partial, alt: ["no"], why: "14 лет бухгалтером с актами и накладными, ОС прямо нет"}
+        qualities: {s: partial, alt: [full], why: "«внимательность к деталям», «системный подход» — самоописание; коммуникабельности нет"}
+        inventory: {s: unknown, alt: ["no"], review: true, why: "не указано"}
+        docs_move: {s: "no", alt: [partial, unknown], review: true, why: "«Готовность осваивать … оформление перемещений и списаний»"}
+        os_accounting: {s: "no", alt: [partial, unknown], review: true, why: "«Готовность осваивать специфику учёта основных средств»"}
+        grants: {s: "no", alt: [unknown], review: true, why: "«в т. ч. учёт по субсидиям/грантам» — в готовности осваивать"}
+        office: {s: full, alt: [partial], why: "«Формат работы: на месте работодателя», Долгопрудный"}
+      v3:
+        communication: {s: unknown, alt: [partial], why: "не указано"}
+        responsibility: {s: partial, alt: [full], why: "«ответственность» — самоописание"}
+        tables: {s: full, alt: [partial], why: "«Способность работать с большими объёмами информации», MS Excel"}
+        laptop: {s: unknown, why: "не указано"}
+        interaction: {s: unknown, alt: [partial], review: true, why: "не указано"}
+        edu_gov: {s: full, why: "ИФНС, специалист юридического отдела"}
+        clerk: {s: full, why: "«Ведение делопроизводства в рамках должностных обязанностей»"}
+        onsite: {s: full, alt: [partial], why: "«Формат работы: на месте работодателя»"}
+        orgs: {s: unknown, why: "не указано"}
+        docs_check: {s: full, alt: [partial], review: true, why: "«контроль комплектности и наличия оригиналов документов»"}
+        stats: {s: partial, alt: [full, unknown], review: true, why: "«формирование отчётности»"}
+        office: {s: full, alt: [partial], why: "живёт в Долгопрудном, «на месте работодателя»"}
