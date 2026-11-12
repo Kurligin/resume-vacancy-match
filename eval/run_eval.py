@@ -150,10 +150,13 @@ def main() -> int:
     ap.add_argument("--today", default=None, help="ГГГГ-ММ-ДД, по умолчанию дата из эталона")
     ap.add_argument("--gold", default=str(HERE / "gold" / "case.yaml"))
     ap.add_argument("--out", default=str(HERE), help="папка для report.md и last.json")
+    ap.add_argument("--cache", default=None, help="свой файл кэша модели (замер скорости без кэша)")
     args = ap.parse_args()
 
     gold = yaml.safe_load(Path(args.gold).read_text(encoding="utf-8"))
     load_env(Path(args.env).expanduser())
+    if args.cache:
+        os.environ["RVM_CACHE"] = str(Path(args.cache).expanduser())
     # соль нужна только для отпечатков контактов; на замер качества не влияет
     os.environ.setdefault("RVM_HASH_SALT", secrets.token_hex(16))
     os.environ["LLM_MODEL"] = args.model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
