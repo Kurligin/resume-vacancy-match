@@ -104,11 +104,6 @@ def test_pdf_encrypted() -> None:
     assert load_bytes("p.pdf", buf.getvalue()).status == FileStatus.ENCRYPTED
 
 
-def test_image_has_no_text_layer() -> None:
-    d = load_bytes("photo.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 50)
-    assert d.status == FileStatus.EMPTY and "no_text_layer" in d.warnings
-
-
 def test_rtf() -> None:
     rtf = rb"{\rtf1\ansi\ansicpg1251 \'ce\'ef\'fb\'f2 \'f0\'e0\'e1\'ee\'f2\'fb\par Python\par}"
     d = load_bytes("r.rtf", rtf)

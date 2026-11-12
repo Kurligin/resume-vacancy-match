@@ -15,11 +15,12 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 from striprtf.striprtf import rtf_to_text
 
+from rvm.ingest import ocr
 from rvm.ingest.normalize import to_lines
 from rvm.models import Document, FileStatus
 
 MAX_BYTES = 15 * 1024 * 1024
-NO_TEXT_LAYER = "no_text_layer"
+NO_TEXT_LAYER = ocr.NO_TEXT_LAYER
 
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -77,7 +78,7 @@ def _dispatch(name: str, data: bytes) -> Document:
             raise _FileError(FileStatus.ENCRYPTED, "документ защищён паролем")
         return _read_doc(name, data)
     if data.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n")):
-        return Document(name=name, lines=[], status=FileStatus.EMPTY, warnings=[NO_TEXT_LAYER])
+        return ocr.read_image(name, data)
     return load_text(name, _decode_text(data))
 
 
@@ -169,7 +170,7 @@ def _read_pdf(name: str, data: bytes) -> Document:
     pages = [page.extract_text() or "" for page in reader.pages]
     lines = to_lines(pages)
     if not lines:
-        return Document(name=name, lines=[], status=FileStatus.EMPTY, warnings=[NO_TEXT_LAYER])
+        return ocr.read_pdf(name, data)
     return Document(name=name, lines=lines)
 
 
