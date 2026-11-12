@@ -5,8 +5,9 @@ from typing import Any
 
 
 class FakeOpenAI:
-    def __init__(self, replies: list[str | Exception]) -> None:
+    def __init__(self, replies: list[str | Exception], finish_reason: str = "stop") -> None:
         self.replies = list(replies)
+        self.finish_reason = finish_reason
         self.calls: list[dict[str, Any]] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
@@ -16,6 +17,10 @@ class FakeOpenAI:
         if isinstance(reply, Exception):
             raise reply
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=reply))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=reply), finish_reason=self.finish_reason
+                )
+            ],
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
         )

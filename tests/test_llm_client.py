@@ -6,7 +6,7 @@ import pytest
 from fake_llm import FakeOpenAI
 from pydantic import BaseModel
 
-from rvm.llm import DemoCacheMiss, LLMClient, LLMError
+from rvm.llm import DemoCacheMiss, LLMClient, LLMError, LLMTruncated
 
 
 class Answer(BaseModel):
@@ -85,8 +85,27 @@ def test_schema_rejected_falls_back_to_json_object(tmp_path: Path) -> None:
 def test_openrouter_extra_body(tmp_path: Path) -> None:
     fake = FakeOpenAI(['{"value": 1}'])
     make(tmp_path, fake, base_url="https://openrouter.ai/api/v1").complete(MSGS, Answer, "v1")
-    provider = fake.calls[0]["extra_body"]["provider"]
-    assert provider == {"require_parameters": True, "data_collection": "deny"}
+    body = fake.calls[0]["extra_body"]
+    assert body["provider"] == {"require_parameters": True, "data_collection": "deny"}
+    assert body["reasoning"] == {"enabled": False}  # рассуждения съедали лимит и время
+    assert fake.calls[0]["max_tokens"] == 4096
+
+
+def test_max_tokens_from_env_and_no_reasoning_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1000")
+    fake = FakeOpenAI(['{"value": 1}'])
+    make(tmp_path, fake).complete(MSGS, Answer, "v1")
+    assert fake.calls[0]["max_tokens"] == 1000
+    assert "extra_body" not in fake.calls[0]
+
+
+def test_truncated_answer_is_clear_error(tmp_path: Path) -> None:
+    fake = FakeOpenAI(['{"value": '], finish_reason="length")
+    with pytest.raises(LLMTruncated, match="LLM_MAX_TOKENS"):
+        make(tmp_path, fake).complete(MSGS, Answer, "v1")
+    assert len(fake.calls) == 1  # без повтора: тот же лимит обрежет снова
 
 
 def test_yandex_header(tmp_path: Path) -> None:

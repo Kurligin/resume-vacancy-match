@@ -1,7 +1,10 @@
 import os
 import re
+import threading
+import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -162,3 +165,36 @@ def test_case_files(tmp_path: Path) -> None:
     assert len(leaks) >= 7  # фамилии и имена четырёх кандидатов
     found = sorted(w for w in leaks if re.search(rf"(?<!\w){re.escape(w)}", sent))
     assert found == []
+
+
+class SlowFake(RoutingFake):
+    """Отвечает с задержкой и считает, сколько вызовов шло одновременно."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lock = threading.Lock()
+        self.now = self.peak = 0
+
+    def _create(self, **kwargs: Any) -> Any:
+        with self.lock:
+            self.now += 1
+            self.peak = max(self.peak, self.now)
+        time.sleep(0.05)
+        try:
+            return super()._create(**kwargs)
+        finally:
+            with self.lock:
+                self.now -= 1
+
+
+def test_pairs_run_in_parallel_same_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vacs = VACANCIES | {"v3": doc_of("Вакансия 3.docx", "Аналитик", "Требования: SQL")}
+    dumps = {}
+    for workers in ("1", "4"):
+        monkeypatch.setenv("RVM_WORKERS", workers)
+        fake = SlowFake()
+        report = analyze(RESUME, vacs, make_llm(tmp_path / workers, fake), TODAY)
+        assert fake.peak == (1 if workers == "1" else 3)  # три пары разом
+        dumps[workers] = report.model_dump(exclude={"elapsed_s", "created_at"})
+    assert dumps["1"] == dumps["4"]
+    assert [v["id"] for v in dumps["4"]["vacancies"]]  # отчёт не пустой
