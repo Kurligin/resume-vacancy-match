@@ -392,7 +392,7 @@ def test_names_and_nicks_masked_and_caught(line: str, leaks: tuple[str, ...]) ->
     [
         "Spring Boot, Data Science, Apache Kafka",
         "Работал в Альфа Банк, Яндекс Практикум",
-        "Файлы main.py, package.json; React.memo, Next.js, Vue.js, ASP.NET",
+        "Стек: React, Next.js, Vue.js, ASP.NET",
         "Знаю GitHub Actions и Telegram Bot API",
         "Python Developer",
     ],
@@ -432,3 +432,42 @@ def test_case_vacancies_skills_intact() -> None:
         assert_clean(m)
         before = {h.canonical for h in find_in_lines(src.lines)}
         assert {h.canonical for h in find_in_lines(m.doc.lines)} == before, path.name
+
+
+def test_rough_domain_check_independent_of_mask() -> None:
+    # любой «слово.зона», в т. ч. внутри цепочки после «.»/«-»
+    for line in ("my-site.portfolio.ivanov.dev", "сайт ivanov.dev", "проект -ivanov.ru"):
+        assert "домен" in _rough_hits(line), line
+    # навыки справочника (точное совпадение) — не домен
+    assert not _rough_hits("Node.js, Socket.io, ASP.NET, Vue.js, Mail.ru Cloud")
+    m = mask(doc_of("Портфолио my-site.portfolio.ivanov.dev, файл main.py", "Опыт 5 лет"))
+    assert "ivanov" not in m.doc.lines[0].text and "main.py" not in m.doc.lines[0].text
+    assert_clean(m)
+    m.doc.lines[1].text = "см. my-site.portfolio.ivanov.dev"
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+
+
+def test_latin_filename_words_closed_by_default() -> None:
+    src = doc_of(
+        "Ivanov Petr",
+        "Контакты: IVANOV, ник ivanov_petr, petr-ivanov",
+        "Опыт: Python, Django",
+        name="resume Ivanov Petr.pdf",
+    )
+    m = mask(src, "resume Ivanov Petr.pdf")
+    text = text_of(m.doc).lower()
+    assert "ivanov" not in text and "petr" not in text
+    assert "Python, Django" in m.doc.lines[2].text
+    assert_clean(m)
+    # проверка ищет сырые слова имени файла без учёта регистра, без транслита
+    m.doc.lines[2].text = "автор: IVANOV"
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+
+
+def test_latin_filename_stop_words_kept() -> None:
+    line = "Senior Python Developer, CV, Backend, QA"
+    m = mask(doc_of(line, "Опыт 5 лет"), "Резюме Senior Python Developer CV Final.pdf")
+    assert m.doc.lines[0].text == line
+    assert_clean(m)
