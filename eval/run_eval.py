@@ -9,6 +9,7 @@
 import argparse
 import json
 import os
+import secrets
 import sys
 import time
 from datetime import date
@@ -152,6 +153,8 @@ def main() -> int:
 
     gold = yaml.safe_load(Path(args.gold).read_text(encoding="utf-8"))
     load_env(Path(args.env).expanduser())
+    # соль нужна только для отпечатков контактов; на замер качества не влияет
+    os.environ.setdefault("RVM_HASH_SALT", secrets.token_hex(16))
     os.environ["LLM_MODEL"] = args.model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
     if not os.environ.get("LLM_API_KEY") and os.environ.get("LLM_MODE", "live") == "live":
         print("Нет LLM_API_KEY в env-файле", file=sys.stderr)
