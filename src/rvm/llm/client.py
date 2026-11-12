@@ -25,6 +25,10 @@ class LLMError(RuntimeError):
     """Модель дважды вернула ответ, не проходящий схему."""
 
 
+class LLMTruncated(LLMError):
+    """Ответ обрезан по лимиту длины: JSON неполный, повтор с тем же лимитом не поможет."""
+
+
 class DemoCacheMiss(LLMError):
     """demo-режим: ответа нет в кэше, а вызывать модель нельзя."""
 
@@ -44,6 +48,7 @@ class LLMClient:
         self.base_url = base_url or env.get("LLM_BASE_URL", "")
         self.model = model or env.get("LLM_MODEL", "")
         self.mode = mode or env.get("LLM_MODE", "live")
+        self.max_tokens = int(env.get("LLM_MAX_TOKENS", "4096"))
         if self.mode not in ("live", "demo"):
             raise ValueError(f"LLM_MODE: ожидается live или demo, получено {self.mode!r}")
         self.cache_path = Path(cache_path or env.get("RVM_CACHE", "var/cache.sqlite"))
@@ -64,6 +69,7 @@ class LLMClient:
                 base_url=self.base_url or None, api_key=api_key or env.get("LLM_API_KEY")
             )
         self._json_object = False  # провайдер отверг json_schema — дальше json_object
+        self._reasoning_off = "openrouter" in self.base_url  # модель без рассуждений — сброс
 
     def complete(self, messages: Messages, schema: type[BaseModel], prompt_version: str) -> Any:
         json_schema = to_strict_json_schema(schema)
@@ -119,17 +125,31 @@ class LLMClient:
             return db.execute(query, args).fetchall()
 
     def _call(self, messages: Messages, schema: type[BaseModel], json_schema: dict) -> str:
-        kwargs: dict[str, Any] = {"model": self.model, "temperature": 0, "seed": 7}
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "temperature": 0,
+            "seed": 7,
+            "max_tokens": self.max_tokens,
+        }
         if "openrouter" in self.base_url:
             kwargs["extra_body"] = {
                 "provider": {"require_parameters": True, "data_collection": "deny"}
             }
+            if self._reasoning_off:
+                # гибридные модели (qwen3) иначе «думают» в десятки раз дольше ответа
+                kwargs["extra_body"]["reasoning"] = {"enabled": False}
         elif "yandex" in self.base_url:
             kwargs["extra_headers"] = {"x-data-logging-enabled": "false"}
         if not self._json_object:
             try:
                 fmt = {"name": schema.__name__, "schema": json_schema, "strict": True}
                 return self._send(messages, {"type": "json_schema", "json_schema": fmt}, kwargs)
+            except openai.NotFoundError:
+                if not self._reasoning_off:
+                    raise
+                # с require_parameters модель без рассуждений не находит провайдера
+                self._reasoning_off = False
+                return self._call(messages, schema, json_schema)
             except openai.BadRequestError:
                 self._json_object = True
         hint = f"Ответь только JSON по схеме:\n{json.dumps(json_schema, ensure_ascii=False)}"
@@ -152,4 +172,10 @@ class LLMClient:
                     "completion_tokens": resp.usage.completion_tokens,
                 }
                 f.write(json.dumps(rec) + "\n")
-        return resp.choices[0].message.content or ""
+        choice = resp.choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise LLMTruncated(
+                f"ответ модели обрезан по лимиту {self.max_tokens} токенов — "
+                "увеличьте LLM_MAX_TOKENS или сократите текст"
+            )
+        return choice.message.content or ""

@@ -1,8 +1,10 @@
 """Конвейер целиком: одно резюме × набор вакансий → Report. Им пользуются API, интерфейс,
 замер качества и живой прогон. Перед любым вызовом модели текст обезличивается."""
 
+import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from functools import cache
@@ -14,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from rvm.experience import check_declared, snapshot_note, total_months
 from rvm.facts import Discrepancy, ResumeFacts
-from rvm.llm import LLMClient, LLMError
+from rvm.llm import LLMClient, LLMError, LLMTruncated
 from rvm.models import Document, FileStatus, Line, MatchRow, Requirement, Status
 from rvm.pipeline import explain as explain_mod
 from rvm.pipeline import extract_resume, extract_vacancy
@@ -26,7 +28,15 @@ from rvm.pipeline.questions import Questions, questions
 from rvm.pipeline.verify import LETTER_BLOCK
 from rvm.privacy import PrivacyError, assert_clean, mask
 from rvm.refs.skills import canonical, entries
-from rvm.scoring import Contribution, PairScore, Redirect, Verdict, rank_vacancies, score_pair
+from rvm.scoring import (
+    Contribution,
+    PairScore,
+    Place,
+    Redirect,
+    Verdict,
+    rank_vacancies,
+    score_pair,
+)
 
 WISH_BLOCK = "Желаемая должность"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "ollama"}  # модель не покидает машину
@@ -141,6 +151,11 @@ def guess_applied(resume: Document, vacancies: dict[str, Document]) -> str | Non
     return hits[0][1]
 
 
+def _why(err: Exception) -> str:
+    # текст обрезки безопасен и подсказывает, что делать; прочие тексты могут нести ответ модели
+    return str(err) if isinstance(err, LLMTruncated) else type(err).__name__
+
+
 def _unknown_rows(reqs: list[Requirement]) -> list[MatchRow]:
     return [
         MatchRow(
@@ -216,17 +231,17 @@ def analyze(
         try:
             facts = extract_resume.extract_resume_facts(doc, llm)
         except _MODEL_ERRORS as err:
-            warnings.append(f"ошибка модели при разборе резюме: {type(err).__name__}")
+            warnings.append(f"ошибка модели при разборе резюме: {_why(err)}")
 
-    results: dict[str, VacancyResult] = {}
-    for vid, mv in masked_vacs.items():
+    def pair(vid: str) -> VacancyResult:
+        mv = masked_vacs[vid]
         vwarn = [f"{vacancies[vid].name}: {w}" for w in vacancies[vid].warnings]
         reqs: list[Requirement] = []
         if mv.doc.lines:
             try:
                 reqs = extract_vacancy.extract_requirements(mv.doc, llm)
             except _MODEL_ERRORS as err:
-                vwarn.append(f"ошибка модели при разборе вакансии: {type(err).__name__}")
+                vwarn.append(f"ошибка модели при разборе вакансии: {_why(err)}")
         rows: list[MatchRow] = []
         if reqs and doc.lines:
             try:
@@ -234,7 +249,7 @@ def analyze(
             except _MODEL_ERRORS:  # match сам ловит только LLMError; сеть — здесь
                 rows = _unknown_rows(reqs)
         score = score_pair(reqs, rows)
-        results[vid] = VacancyResult(
+        return VacancyResult(
             id=vid,
             title=title_of(vacancies[vid]),
             requirements=reqs,
@@ -245,6 +260,11 @@ def analyze(
             warnings=vwarn,
         )
 
+    # пары и выводы независимы: вызовы модели идут параллельно, порядок — как во входе
+    workers = int(os.environ.get("RVM_WORKERS", "4"))
+    with ThreadPoolExecutor(workers) as pool:
+        results = dict(zip(masked_vacs, pool.map(pair, masked_vacs), strict=True))
+
     ranking = rank_vacancies({vid: r.score for vid, r in results.items()}, applied)
     pair_facts = Facts(
         resume=facts,
@@ -254,8 +274,8 @@ def analyze(
     )
     checks = build_checks(facts, pair_facts.discrepancies, pair_facts.snapshot_note)
     rd = ranking.redirect
-    ordered = []
-    for p in ranking.places:
+
+    def finish(p: Place) -> VacancyResult:
         r = results[p.id]
         r.place, r.why_not_first = p.place, p.why_not_first
         # выводы и письма — по обезличенной таблице пары
@@ -266,7 +286,10 @@ def analyze(
         )
         r.questions = questions(r.requirements, r.rows, checks, llm) if r.rows else None
         r.letters = letters(r.title, r.requirements, r.rows, r.score, to and results[to].title)
-        ordered.append(r)
+        return r
+
+    with ThreadPoolExecutor(workers) as pool:
+        ordered = list(pool.map(finish, ranking.places))
     warnings += facts.warnings
     return Report(
         status=ReportStatus.OK,

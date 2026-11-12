@@ -382,3 +382,11 @@ def test_llm_error_rows_unknown(tmp_path: Path) -> None:
     rows, _ = run(reqs, [["not json"], ["still not json"]], tmp_path)
     for r in rows.values():
         assert r.status == Status.UNKNOWN and r.flags == ["llm_error"]
+
+
+def test_only_study_projects_is_negation(tmp_path: Path) -> None:
+    doc = Document(name="r", lines=[Line(n=1, text="Vue: только учебные проекты.")])
+    quote = "Vue: только учебные проекты"
+    reqs = [req("R1", "Коммерческий опыт на Vue", ReqKind.EXPERIENCE)]
+    rows, _ = run(reqs, [[ans("R1", "no", [(1, quote)])]], tmp_path, doc, ResumeFacts())
+    assert rows["R1"].status == Status.NO

@@ -9,7 +9,7 @@ from rvm.facts import Education, Period, ResumeFacts
 from rvm.llm import LLMClient
 from rvm.models import Document
 
-PROMPT_VERSION = "extract_resume.v1"
+PROMPT_VERSION = "extract_resume.v2"
 PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 
 
