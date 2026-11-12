@@ -180,7 +180,7 @@ def analyze(
         applied = guess_applied(resume, vacancies)
 
     masked_resume = mask(resume, source_name)
-    masked_vacs = {vid: mask(doc) for vid, doc in vacancies.items()}
+    masked_vacs = {vid: mask(doc, names_from_file=False) for vid, doc in vacancies.items()}
     view = ResumeView(
         name=resume.name,
         lines=masked_resume.doc.lines,

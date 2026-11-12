@@ -23,9 +23,33 @@ _LINK = re.compile(
     r"|\b(?:t\.me|telegram\.me|vk\.com|vk\.ru|github\.com|gitlab\.com|linkedin\.com"
     r"|hh\.ru/resume|habr\.com)(?:/\S*)?"
 )
-# сайт без схемы: личный (ivanov.ru) от сайта работодателя не отличить — маскируем любой
+# сайт без схемы на любой зоне: личный (ivanov.dev) от сайта работодателя не отличить —
+# маскируем любой, кроме навыков и файлов (_site_kept)
 # начало только с начала токена: иначе на длинном «a-a-a…» квадратичный откат
-_SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:ru|com|рф|me|io|org|net|su)\b(?:/\S*)?")
+_SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:[a-z]{2,12}|рф)\b(?:/\S*)?")
+# настоящие зоны: «навык.зона» на них — всё-таки сайт
+_ZONES = frozenset(
+    re.findall(
+        r"\w+", "ru com рф me io org net su dev pro tech info site edu app xyz online space blog"
+    )
+)
+# расширения файлов и кода: main.py, package.json — не сайты
+_CODE_EXT = frozenset(
+    re.findall(
+        r"\w+",
+        "js ts jsx tsx mjs py ipynb html htm css scss json yaml yml xml md txt csv sql sh go rb php"
+        " java kt cs cpp hpp vue toml ini cfg conf env lock log pdf doc docx xls xlsx png jpg svg",
+    )
+)
+# ник без «@» после метки мессенджера или сети: «Telegram: ivan_petrov»
+_NICK_LABEL = re.compile(
+    r"(?i)(?P<label>(?<![\w-])(?:telegram|телеграмм?|tg|тг|skype|скайп|github|gitlab|vk|вк"
+    r"|vkontakte|вконтакте|whatsapp|instagram|linkedin|discord|twitter)\s*:\s*)"
+    r"(?P<nick>(?=[\w.:-]*[a-z_])[a-z0-9_.:-]*[a-z0-9_])"
+)
+# научные номера: DOI и ORCID целиком (остальные длинные цифры закрывает общий «[номер]»)
+_DOI = re.compile(r"(?i)\b(?:doi:?\s*)?10\.\d{4,9}/[^\s,;]+")
+_ORCID = re.compile(r"(?i)\b\d{4}-\d{4}-\d{4}-\d{3}[\dx]\b")
 # почтовые домены, которые пишут без зоны: «ivan@mail»
 _MAILBOX = r"(?:mail|gmail|yandex|ya|bk|inbox|list|rambler|outlook|hotmail|icloud|yahoo|proton)"
 # почта и с пробелами вокруг «@»: «ivan @ mail.ru»
@@ -91,6 +115,8 @@ _AGE_NEAR = re.compile(r"(?i)\b\d{1,3}\s*(?:год|года|лет)\b")
 # порядок важен: ссылки и почта раньше ников и телефонов
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ссылка", _LINK),
+    ("номер", _DOI),
+    ("номер", _ORCID),
     ("почта", _EMAIL),
     ("ссылка", _SITE),
     ("телефон", _PHONE),
@@ -103,10 +129,20 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 _DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
 _ROUGH_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:\w[\w-]*\.\w{{2,}}|{_MAILBOX}\b)")
 _AT_LEAK = re.compile(r"@(?!\s*(?:\d|$))")
-_DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:ru|com|рф|me|io|org|net|su)\b")
 _MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
 _NAME_TAGS = ("Name", "Surn", "Patr")
+_PATR_END = re.compile(r"(?:ович|евич|ьич|овна|евна|ична)$")
+_HEAD = 5  # шапка: первые непустые строки, где ищем латинское «Имя Фамилия»
+_LATIN = re.compile(r"[A-Za-z]+")
+_TR = dict(
+    re.findall(
+        r"(\w+):(\w+)",
+        "shch:щ sch:щ zh:ж kh:х ts:ц ch:ч sh:ш yu:ю ya:я yo:ё iy:ий a:а b:б v:в g:г d:д e:е z:з"
+        " i:и k:к l:л m:м n:н o:о p:п r:р s:с t:т u:у f:ф h:х x:кс c:к w:в q:к y:ы j:й",
+    )
+)
+_TR_RE = re.compile("|".join(sorted(_TR, key=len, reverse=True)))
 
 
 class PrivacyError(Exception):
@@ -146,10 +182,68 @@ def _lemmas(word: str) -> set[str]:
     return {f.replace("ё", "е") for f in forms}
 
 
+def _translit(word: str) -> str:
+    """Латиница → кириллица, грубо: Dmitry → дмитрий, Kuznetsova → кузнецова."""
+    w = re.sub(r"ia$", "iya", word.lower())
+    w = re.sub(r"(?<=[^aeiouy])y$", "iy", w)
+    w = re.sub(r"(?<=[aeiou])y(?![aeiou])", "j", w)
+    return _TR_RE.sub(lambda m: _TR[m.group()], w)
+
+
+def _name_tags(word: str) -> set[str]:
+    """Теги имени/фамилии/отчества. Незнакомому слову верим только как фамилии или отчеству
+    с типичным окончанием (догадка словаря «питхон — имя» не годится); латиницу — по транслиту
+    и только если словарь знает слово."""
+    if _LATIN.fullmatch(word):
+        word = _translit(word)
+        if not _morph().word_is_known(word):
+            return set()
+    tags = {t for p in _morph().parse(word) for t in _NAME_TAGS if t in p.tag}
+    if not _morph().word_is_known(word):
+        tags &= {"Surn", "Patr"} if _PATR_END.search(word.lower()) else {"Surn"}
+    return tags
+
+
+def _pair_spans(text: str, head: bool) -> list[tuple[int, int]]:
+    """ФИО без NER в любом регистре: отчество; пара «имя + фамилия/отчество» с заглавной
+    (и ЗАГЛАВНЫМИ) или строчными рядом с отчеством («петров иван сергеевич»); латиница —
+    только в шапке."""
+    words = list(_WORD.finditer(text))
+    tags, upper = [], []
+    for m in words:
+        w = m.group()
+        # одна буква — только инициал с точкой («Иванов И.И.»), иначе «В 2020 г.» — отчество
+        ok = (head or not _LATIN.fullmatch(w)) and (
+            len(w) > 1 or text[m.end() : m.end() + 1] == "."
+        )
+        tags.append(_name_tags(w) if ok else set())
+        upper.append(w[0].isupper())
+    out = {i for i, t in enumerate(tags) if "Patr" in t and len(words[i].group()) > 1}
+    # два прохода: строчная тройка ФИО цепляется от отчества в обе стороны
+    for order in (range(1, len(words)), range(len(words) - 1, 0, -1)):
+        for i in order:
+            a, b = tags[i - 1], tags[i]
+            between = text[words[i - 1].end() : words[i].start()]
+            pair = "Name" in a and b - {"Name"} or "Name" in b and a - {"Name"}
+            anchored = upper[i - 1] and upper[i] or bool({i - 1, i} & out)
+            if pair and anchored and re.fullmatch(r"\.?\s*", between):
+                out |= {i - 1, i}
+    return [(words[i].start(), words[i].end()) for i in sorted(out)]
+
+
 def _filename_words(filename: str) -> list[str]:
-    """ФИО из имени файла: слова с заглавной, которые словарь знает как имя или не знает вовсе."""
+    """ФИО из имени файла: кириллица с заглавной, которую словарь знает как имя или не знает
+    вовсе, и латиница, чей транслит — имя. Навыки справочника не берём: «Python Developer»."""
     words = re.findall(r"[А-ЯЁA-Z][а-яёa-z]+(?:-[А-ЯЁA-Z][а-яёa-z]+)?", Path(filename).stem)
-    return [w for w in words if _is_name(w) or not _morph().word_is_known(w)]
+    out = []
+    for w in words:
+        if _LATIN.fullmatch(w):
+            name = bool(_name_tags(w))
+        else:
+            name = _is_name(w) or not _morph().word_is_known(w)
+        if name and canonical(w) is None:
+            out.append(w)
+    return out
 
 
 def _person_spans(text: str) -> list[tuple[int, int]]:
@@ -164,9 +258,11 @@ def _person_spans(text: str) -> list[tuple[int, int]]:
     return [(s.start, s.stop) for s in spans if any(_is_name(w) for w in _WORD.findall(s.text))]
 
 
-def _name_tokens(text: str, known: list[set[str]]) -> list[tuple[int, int, int | None]]:
+def _name_tokens(
+    text: str, known: list[set[str]], head: bool = False
+) -> list[tuple[int, int, int | None]]:
     """Слова-имена: (начало, конец, индекс слова ФИО из файла или None для чужих персон)."""
-    persons = _person_spans(text)
+    persons = _person_spans(text) + _pair_spans(text, head)
     out = []
     for m in _WORD.finditer(text):
         idx = None
@@ -179,11 +275,17 @@ def _name_tokens(text: str, known: list[set[str]]) -> list[tuple[int, int, int |
     return out
 
 
-def _is_skill(text: str, m: re.Match[str]) -> bool:
-    """Доменоподобный токен — навык из справочника (Socket.io, ASP.NET, Mail.ru Cloud)."""
+def _site_kept(text: str, m: re.Match[str]) -> bool:
+    """Доменоподобный токен — не сайт: навык из справочника (Socket.io, ASP.NET, Mail.ru Cloud),
+    файл (main.py) или член навыка не на настоящей зоне (React.memo)."""
     token = m.group().split("/")[0]
     tail = re.match(r"\s+\w+", text[m.end() :])
-    return canonical(token) is not None or bool(tail and canonical(token + tail.group()))
+    if canonical(token) is not None or bool(tail and canonical(token + tail.group())):
+        return True
+    labels = token.lower().split(".")
+    if labels[-1] in _CODE_EXT:
+        return True
+    return len(labels) == 2 and labels[1] not in _ZONES and canonical(labels[0]) is not None
 
 
 def _at_allowed(token: str) -> bool:
@@ -191,12 +293,21 @@ def _at_allowed(token: str) -> bool:
     return token[1:] in _AT_ALLOWED
 
 
-def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, str]]]:
+def _long_number(run: str) -> bool:
+    """Цепочка из 7+ цифр, не дата и не сумма: телефон, грант, ISBN, ИНН."""
+    return sum(c.isdigit() for c in run) >= 7 and not _is_date_or_sum(run)
+
+
+def _mask_line(
+    text: str, known: list[set[str]], head: bool = False
+) -> tuple[str, list[tuple[str, str]]]:
     hits: list[tuple[str, str]] = []
 
     def sub(kind: str, pattern: re.Pattern[str], s: str) -> str:
         def rep(m: re.Match[str]) -> str:
-            if pattern is _SITE and _is_skill(s, m) or pattern is _NICK and _at_allowed(m.group()):
+            if pattern is _SITE and _site_kept(s, m) or pattern is _NICK and _at_allowed(m.group()):
+                return m.group()
+            if pattern is _DIGIT_RUN and not _long_number(m.group()):
                 return m.group()
             hits.append((kind, m.group()))
             return f"[{kind}]"
@@ -208,9 +319,17 @@ def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, s
     for kind, pattern in _PATTERNS:
         text = sub(kind, pattern, text)
     text = sub("ник", _NICK, text)
+
+    def label_nick(m: re.Match[str]) -> str:
+        hits.append(("ник", m.group("nick")))
+        return m.group("label") + "[ник]"
+
+    text = _NICK_LABEL.sub(label_nick, text)
     if near_age:
         text = sub("возраст", _AGE_NEAR, text)
-    for start, end, _ in reversed(_name_tokens(text, known)):
+    # всё, что ловит грубая проверка цифр, закрываем: иначе ложная ошибка обезличивания
+    text = sub("номер", _DIGIT_RUN, text)
+    for start, end, _ in reversed(_name_tokens(text, known, head)):
         hits.append(("ФИО", text[start:end]))
         text = f"{text[:start]}[ФИО]{text[end:]}"
     return text, hits
@@ -242,12 +361,23 @@ def _neutral_name(lines: list[Line]) -> str:
     return "resume_" + "".join(chr(ord("a") + int(c, 16)) for c in digest[:10])
 
 
-def mask(doc: Document, filename: str | None = None) -> Masked:
-    """Новый Document с теми же строками, где персональные данные заменены масками."""
-    known = [_lemmas(w) for w in _filename_words(filename or doc.name)]
+def _heads(lines: list[Line]) -> list[bool]:
+    """Строка в шапке: среди первых _HEAD непустых."""
+    out, seen = [], 0
+    for line in lines:
+        out.append(seen < _HEAD)
+        seen += bool(line.text.strip())
+    return out
+
+
+def mask(doc: Document, filename: str | None = None, *, names_from_file: bool = True) -> Masked:
+    """Новый Document с теми же строками, где персональные данные заменены масками.
+    Вакансии маскируем без слов из имени (names_from_file=False): там название, а не ФИО."""
+    words = _filename_words(filename or doc.name) if names_from_file else []
+    known = [_lemmas(w) for w in words]
     lines, table = [], []
-    for line in doc.lines:
-        text, hits = _mask_line(line.text, known)
+    for line, head in zip(doc.lines, _heads(doc.lines), strict=True):
+        text, hits = _mask_line(line.text, known, head)
         lines.append(line.model_copy(update={"text": text}))
         table += [(line.n, kind, value) for kind, value in hits]
     warnings = [_mask_line(w, known)[0] for w in doc.warnings]
@@ -270,18 +400,18 @@ def _is_date_or_sum(run: str) -> bool:
     return len(groups[0]) <= 3 and groups[-1] == "000" and all(len(g) == 3 for g in groups[1:])
 
 
-def _rough_hits(text: str) -> list[str]:
+def _rough_hits(text: str, head: bool = False) -> list[str]:
     """Проверки, которые не зависят от детекторов маски: ловят то, что маска пропустила."""
-    hits = []
-    for m in _DIGIT_RUN.finditer(text):
-        if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
-            hits.append("цифры")
+    hits = ["цифры" for m in _DIGIT_RUN.finditer(text) if _long_number(m.group())]
     hits += ["почта"] * len(_ROUGH_EMAIL.findall(text))
     # любой «@», кроме белого списка и масок, — утечка (без опоры на детектор ника);
     # одиночный «@» перед числом или в конце строки («Сбер @ 2020») — не утечка
     rest = _NICK.sub(lambda m: "" if _at_allowed(m.group()) else m.group(), _MASK.sub("", text))
     hits += ["@"] * len(_AT_LEAK.findall(rest))
-    hits += ["домен" for m in _DOMAIN.finditer(text) if not _is_skill(text, m)]
+    hits += ["домен" for m in _SITE.finditer(text) if not _site_kept(text, m)]
+    hits += ["ник"] * len(_NICK_LABEL.findall(text))
+    # ФИО без NER: отчество, пара «имя + фамилия» в любом регистре, латиница в шапке
+    hits += ["ФИО"] * len(_pair_spans(text, head))
     return hits
 
 
@@ -291,11 +421,13 @@ def assert_clean(masked: Masked) -> None:
     known = [_lemmas(v) for _, kind, v in masked.replacements if kind == "ФИО"]
     known += [_lemmas(w) for w in _filename_words(masked.doc.name)]
     left: Counter[str] = Counter()
-    texts = [masked.doc.name, *masked.doc.warnings, *(ln.text for ln in masked.doc.lines)]
-    for text in texts:
-        _, hits = _mask_line(text, known)
+    lines = masked.doc.lines
+    texts = [(masked.doc.name, False), *((w, False) for w in masked.doc.warnings)]
+    texts += [(ln.text, head) for ln, head in zip(lines, _heads(lines), strict=True)]
+    for text, head in texts:
+        _, hits = _mask_line(text, known, head)
         left.update(kind for kind, _ in hits)
-        left.update(_rough_hits(text))
+        left.update(_rough_hits(text, head))
     if left:
         # в сообщении только типы и число, без самих значений
         raise PrivacyError(f"после маски остались данные: {dict(left)}")

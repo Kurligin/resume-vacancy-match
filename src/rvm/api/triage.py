@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from rvm import store
 from rvm.api.auth import Recruiter
-from rvm.pipeline.analyze import Report, VacancyResult
+from rvm.pipeline.analyze import Report, ReportStatus, VacancyResult
 from rvm.pipeline.explain import Point
 from rvm.scoring import Verdict, config
 from rvm.store import CandidateStatus
@@ -54,6 +54,7 @@ class Triage(BaseModel):
     nofit: list[TriageItem]
     done: int  # уже с решением
     pending: int  # оценка ещё не готова
+    check_file: int = 0  # обезличивание не прошло: нужна проверка файла
 
 
 class DecideBody(BaseModel):
@@ -150,6 +151,9 @@ def router(db: Path, batch_ids: Callable[[str], list[int] | None]) -> APIRouter:
                 rep = store.load_report(db, c["resume_id"])
             except KeyError:
                 rep = None
+            if rep is not None and rep.status == ReportStatus.PRIVACY_ERROR:
+                out.check_file += 1
+                continue
             if rep is None or not rep.vacancies:
                 out.pending += 1
                 continue

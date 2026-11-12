@@ -14,7 +14,7 @@ from rvm.llm.fake import RoutingFake
 from rvm.models import Document, Line, Status
 from rvm.pipeline import analyze as analyze_mod
 from rvm.pipeline.analyze import Report, ReportStatus, analyze, guess_applied
-from rvm.privacy import PrivacyError
+from rvm.privacy import Masked, PrivacyError
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
 needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
@@ -106,11 +106,22 @@ def test_llm_error_in_one_pair(tmp_path: Path) -> None:
     assert by_id["v1"].place is not None
 
 
-def test_vacancy_with_leftover_contact_skipped(tmp_path: Path) -> None:
+def test_vacancy_with_leftover_contact_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     vacs = {
         **VACANCIES,
         "v3": doc_of("Вакансия 3.docx", "Аналитик", "Контактное лицо: звонить 916 123 45 67"),
     }
+    real = analyze_mod.assert_clean
+
+    def leftover(masked: Masked) -> None:
+        # маска закрывает и этот номер — проверку-страховку роняем вручную
+        if any("Аналитик" in ln.text for ln in masked.doc.lines):
+            raise PrivacyError("после маски остались данные: {'цифры': 1}")
+        real(masked)
+
+    monkeypatch.setattr(analyze_mod, "assert_clean", leftover)
     fake = RoutingFake()
     report = analyze(RESUME, vacs, make_llm(tmp_path, fake), TODAY)
     assert report.status == ReportStatus.OK
