@@ -228,7 +228,8 @@ def test_contacts_near_tech_still_masked() -> None:
     text = text_of(m.doc)
     for leak in ("ivan@", "ivan_dev", "github.com/ivan"):
         assert leak not in text
-    assert text.count("[почта]") == 2 and text.count("[ссылка]") == 2
+    assert text.count("[почта]") == 2 and text.count("[ссылка]") == 1
+    assert text.count("[ник]") == 1
     assert "Socket.io" in text
     assert_clean(m)
 
@@ -280,3 +281,31 @@ def test_rough_checks_linear_on_long_tokens() -> None:
     start = time.perf_counter()
     assert not _rough_hits(long) and not _SITE.search(long)
     assert time.perf_counter() - start < 0.5
+
+
+@pytest.mark.parametrize("line", ["Связь: @ivan_dev", "@IvanDev", "пишите @ivan", "@ivan."])
+def test_any_nick_masked_by_default(line: str) -> None:
+    m = mask(doc_of(line))
+    assert "@" not in m.doc.lines[0].text and "[ник]" in m.doc.lines[0].text
+    assert_clean(m)
+    raw = mask(doc_of("Опыт 5 лет"))
+    raw.doc.lines[0].text = line
+    with pytest.raises(PrivacyError):
+        assert_clean(raw)
+
+
+@pytest.mark.parametrize(
+    "line", ["@Override, @Component", "@media", "@font-face, @keyframes", "@NgModule", "@python"]
+)
+def test_whitelisted_at_tokens_kept(line: str) -> None:
+    m = mask(doc_of(line))
+    assert m.doc.lines[0].text == line
+    assert_clean(m)
+
+
+@pytest.mark.parametrize("planted", ["@override", "user@localhost", "ivan @ "])
+def test_assert_clean_any_leftover_at(planted: str) -> None:
+    m = mask(doc_of("Опыт 5 лет"))
+    m.doc.lines[0].text += f" {planted}"
+    with pytest.raises(PrivacyError):
+        assert_clean(m)

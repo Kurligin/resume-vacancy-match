@@ -1,7 +1,7 @@
 """Маскирование ФИО, контактов, возраста, пола и адреса внутри строк (номера строк не меняются).
 
-Город не маскируем: он нужен для условий вакансии. Родовые окончания глаголов («работала»)
-не трогаем — это известное ограничение.
+Любой «@токен» вне белого списка — ник. Город не маскируем: он нужен для условий вакансии.
+Родовые окончания глаголов («работала») не трогаем — это известное ограничение.
 """
 
 import hashlib
@@ -32,11 +32,41 @@ _EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:[\w-]+(?:\.[\w-]+)+|{_MAILBOX}\b)
 _PHONE = re.compile(
     r"(?<![\w+])(?:(?:\+\d{1,3}|[78])[\s-]*\(?\d{3}\)?|\(\d{3}\))(?:[\s-]*\d){7}(?!\d)"
 )
-_NICK = re.compile(r"(?<![\w.])@[A-Za-z]\w{3,}")
-# «@ник» — контакт только рядом с мессенджером или словом «контакты»: иначе это @Override, @media
-_MESSENGER = re.compile(
-    r"(?i)telegram|телеграм|телега|instagram|инстаграм|whatsapp|ватсап|контакт|\b(?:tg|тг|вк|vk)\b"
+# любой «@токен» — ник, кроме белого списка: аннотации Java/Angular и CSS-правила
+_NICK = re.compile(r"(?<![\w.+-])@[\w.-]*\w")
+_AT_ALLOWED = frozenset(
+    [
+        "Override",
+        "Component",
+        "Service",
+        "Repository",
+        "RestController",
+        "Controller",
+        "Autowired",
+        "Bean",
+        "Entity",
+        "Table",
+        "Id",
+        "Test",
+        "Data",
+        "Getter",
+        "Setter",
+        "Inject",
+        "Input",
+        "Output",
+        "NgModule",
+        "Injectable",
+        "Transactional",
+        "Configuration",
+        "media",
+        "import",
+        "keyframes",
+        "font-face",
+        "supports",
+    ]
 )
+# закрытые маски вырезаем перед поиском оставшихся «@»
+_MASK = re.compile(r"\[[а-яё ]+\]")
 _BIRTH = re.compile(
     r"(?i)(?:дата\s+рождения|родил(?:ся|ась))\s*:?\s*(?:в\s+)?"
     r"(?:\d{1,2}[\s./-]*(?:\d{1,2}|[а-яё]+)[\s./-]*)?\d{2,4}(?:\s*(?:года|году|г\.|г\b))?"
@@ -150,12 +180,18 @@ def _is_skill(text: str, m: re.Match[str]) -> bool:
     return canonical(token) is not None or bool(tail and canonical(token + tail.group()))
 
 
+def _at_allowed(token: str) -> bool:
+    """«@токен» из белого списка или навык из справочника (@python) — не ник."""
+    name = token[1:]
+    return name in _AT_ALLOWED or canonical(name) is not None
+
+
 def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, str]]]:
     hits: list[tuple[str, str]] = []
 
     def sub(kind: str, pattern: re.Pattern[str], s: str) -> str:
         def rep(m: re.Match[str]) -> str:
-            if pattern is _SITE and _is_skill(s, m):
+            if pattern is _SITE and _is_skill(s, m) or pattern is _NICK and _at_allowed(m.group()):
                 return m.group()
             hits.append((kind, m.group()))
             return f"[{kind}]"
@@ -164,11 +200,9 @@ def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, s
 
     near_age = bool(_SEX.search(text) or _BIRTH.search(text)) or "[пол]" in text
     near_age = near_age or "[дата рождения]" in text
-    messenger = bool(_MESSENGER.search(text))
     for kind, pattern in _PATTERNS:
         text = sub(kind, pattern, text)
-    if messenger:
-        text = sub("ссылка", _NICK, text)
+    text = sub("ник", _NICK, text)
     if near_age:
         text = sub("возраст", _AGE_NEAR, text)
     for start, end, _ in reversed(_name_tokens(text, known)):
@@ -236,8 +270,9 @@ def _rough_hits(text: str) -> list[str]:
         if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
             hits.append("цифры")
     hits += ["почта"] * len(_ROUGH_EMAIL.findall(text))
-    if _MESSENGER.search(text):
-        hits += ["ник"] * len(_NICK.findall(text))
+    # любой «@», кроме белого списка и масок, — утечка (без опоры на детектор ника)
+    rest = _NICK.sub(lambda m: "" if _at_allowed(m.group()) else m.group(), _MASK.sub("", text))
+    hits += ["@"] * rest.count("@")
     hits += ["домен" for m in _DOMAIN.finditer(text) if not _is_skill(text, m)]
     return hits
 
