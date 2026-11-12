@@ -24,6 +24,7 @@ from rvm.privacy import Masked
 from rvm.scoring import PairScore, rank_vacancies, score_pair
 
 FROM_CANDIDATE = "со слов кандидата"
+BY_RECRUITER = "изменено рекрутером"
 CLARIFIED = "прояснено со слов кандидата"
 RECRUITER = "рекрутер"
 _LINES = TypeAdapter(list[Line])
@@ -130,6 +131,7 @@ class CandidateStatus(StrEnum):
     INVITED = "invited"
     RESERVE = "reserve"
     REJECTED = "rejected"
+    CUST_REJECTED = "cust_rejected"  # отказ заказчика
 
 
 class CleanupError(RuntimeError):
@@ -412,14 +414,23 @@ def card(db: Path, candidate_id: int) -> dict[str, Any]:
     }
 
 
-def set_status(db: Path, candidate_id: int, status: CandidateStatus, who: str = RECRUITER) -> None:
+def set_status(
+    db: Path, candidate_id: int, status: CandidateStatus, who: str = RECRUITER, **details: Any
+) -> None:
     new = CandidateStatus(status)  # неизвестный статус → ValueError
     with _tx(db) as conn:
         row = conn.execute("SELECT status FROM candidates WHERE id=?", (candidate_id,)).fetchone()
         if row is None:
             raise KeyError(f"нет кандидата {candidate_id}")
         conn.execute("UPDATE candidates SET status=? WHERE id=?", (str(new), candidate_id))
-        _event(conn, "status", candidate_id, who=who, **{"from": row["status"], "to": str(new)})
+        _event(
+            conn,
+            "status",
+            candidate_id,
+            who=who,
+            **{"from": row["status"], "to": str(new)},
+            **details,
+        )
 
 
 def answer(
@@ -430,9 +441,10 @@ def answer(
     value: Status,
     note: str = "",
     who: str = RECRUITER,
+    flag: str = FROM_CANDIDATE,
 ) -> PairScore:
-    """Ответ кандидата на вопрос: строка получает статус с флагом «со слов кандидата», балл,
-    вилка и места вакансий пересчитываются. Ответ на проверку (D…, SNAPSHOT) балл не меняет:
+    """Ответ кандидата на вопрос: строка получает статус с флагом «со слов кандидата» (или
+    BY_RECRUITER — правка рекрутера), балл, вилка и места вакансий пересчитываются. Ответ на проверку (D…, SNAPSHOT) балл не меняет:
     несостыковка помечается «прояснено со слов кандидата» и уходит из рисков."""
     with _tx(db) as conn:
         cid = _candidate_of(conn, resume_id)
@@ -460,8 +472,8 @@ def answer(
         before = res.score.score
         row.status = Status(value)
         row.note = note
-        if FROM_CANDIDATE not in row.flags:
-            row.flags.append(FROM_CANDIDATE)
+        # флаг говорит, откуда текущий статус: прежний источник заменяется
+        row.flags = [f for f in row.flags if f not in (FROM_CANDIDATE, BY_RECRUITER)] + [flag]
         res.score = score_pair(res.requirements, res.rows)
         res.verdict = res.score.verdict
 
@@ -482,7 +494,7 @@ def answer(
         )
         _event(
             conn,
-            "answer",
+            "answer" if flag == FROM_CANDIDATE else "edited",
             cid,
             vacancy_id,
             who=who,

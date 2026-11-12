@@ -1,10 +1,13 @@
 """HTTP API сервиса: загрузки с очередью, вакансии со сверкой резерва, база кандидатов, оценки.
 
 Тяжёлая работа (чтение файлов, модель) идёт в пуле из двух потоков; состояние пачек и сверок
-резерва — в памяти процесса."""
+резерва — в памяти процесса. Без сессии /api/* отвечает 401 (кроме health и входа),
+изменяющие запросы — только с заголовком X-Requested-With."""
 
 import io
+import logging
 import os
+import secrets
 import threading
 import uuid
 import zipfile
@@ -16,12 +19,25 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rvm import store
-from rvm.ingest import load_bytes, load_text
+from rvm.api import auth
+from rvm.ingest import limits, load_bytes, load_text
 from rvm.ingest.readers import check_zip
 from rvm.llm import LLMClient
 from rvm.models import Document, Status
@@ -31,6 +47,10 @@ from rvm.scoring import PairScore, Verdict, rank_vacancies
 from rvm.store import CandidateStatus
 
 MAX_BATCH = 300  # файлов в одной пачке
+MAX_REQUEST_BYTES = 200 * 2**20  # распакованный объём одного запроса на загрузку
+OPEN_PATHS = {"/api/health", "/api/login", "/api/login-options"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+log = logging.getLogger("rvm.api")
 STATIC = Path(__file__).parent / "static"
 _SKIP_IN_ZIP = ("__MACOSX", ".")  # служебные папки macOS и скрытые файлы
 
@@ -98,6 +118,7 @@ class Card(BaseModel):
     status: CandidateStatus
     created_at: str
     source: str
+    possible_duplicate_of: int | None = None
     versions: list[Version]
     evaluations: list[Evaluation]
     events: list[Event]
@@ -110,6 +131,22 @@ class StatusChange(BaseModel):
 class RowAnswer(BaseModel):
     status: Status
     note: str = ""
+    by: Literal["candidate", "recruiter"] = "candidate"  # ответ кандидата или правка рекрутера
+
+
+class LoginBody(BaseModel):
+    login: str = ""
+    password: str = ""
+    role: auth.Role | None = None  # демо-вход в один клик
+
+
+class Decision(BaseModel):
+    decision: Literal["invite", "reject"]
+    comment: str = ""
+
+
+class MergeBody(BaseModel):
+    other: int  # карточка, которая вливается в текущую
 
 
 class Pair(BaseModel):
@@ -142,20 +179,54 @@ def _zip_name(info: zipfile.ZipInfo) -> str:
     return info.filename.encode("cp437").decode("cp866", errors="replace")
 
 
-def _unpack(name: str, data: bytes) -> list[tuple[str, bytes]]:
+def _too_big() -> HTTPException:
+    return HTTPException(413, f"в запросе больше {MAX_REQUEST_BYTES // 2**20} МБ")
+
+
+def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
+    """Размеры проверяются по ZipInfo.file_size до чтения записей; budget — остаток объёма
+    запроса."""
     if not name.lower().endswith(".zip"):
         return [(name, data)]
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             check_zip(z)
-            return [
-                (_zip_name(i).rsplit("/", 1)[-1], z.read(i))
+            infos = [
+                i
                 for i in z.infolist()
                 if not i.is_dir()
                 and not any(p.startswith(_SKIP_IN_ZIP) for p in _zip_name(i).split("/"))
             ]
+            big = next((i for i in infos if i.file_size > limits.MAX_BYTES), None)
+            if big is not None:
+                raise ValueError(f"{_zip_name(big)} больше {limits.MAX_BYTES} байт")
+            if sum(i.file_size for i in infos) > budget:
+                raise _too_big()
+            return [(_zip_name(i).rsplit("/", 1)[-1], z.read(i)) for i in infos]
+    except HTTPException:
+        raise
     except Exception as e:
         raise ValueError(f"{name}: архив не прочитан: {e}") from e
+
+
+def _need(role: auth.Role) -> Any:
+    def dep(request: Request) -> auth.User:
+        user: auth.User = request.state.user  # без сессии сюда не доходит: 401 в middleware
+        if user.role != role:
+            raise HTTPException(403, f"доступно роли «{auth.ROLE_NAMES[role]}»")
+        return user
+
+    return Depends(dep)
+
+
+def _current(request: Request) -> auth.User:
+    user: auth.User = request.state.user
+    return user
+
+
+Anyone = Annotated[auth.User, Depends(_current)]
+Recruiter = Annotated[auth.User, _need("recruiter")]
+Manager = Annotated[auth.User, _need("manager")]
 
 
 def _with_vacancy(old: Report, new: Report) -> Report:
@@ -173,10 +244,27 @@ def _with_vacancy(old: Report, new: Report) -> Report:
 def create_app(
     db: Path | None = None, llm: LLMClient | None = None, today: date | None = None
 ) -> FastAPI:
-    """Настройки по умолчанию из окружения: RVM_DB, RVM_TODAY, LLM_* (как у клиента модели)."""
-    db = db or Path(os.environ.get("RVM_DB", "var/rvm.sqlite"))
+    """Настройки по умолчанию из окружения: RVM_DB, RVM_TODAY, LLM_* (как у клиента модели),
+    RVM_SECRET (подпись сессий), RVM_ALLOWED_HOSTS (домены стенда через запятую),
+    RVM_DEMO_LOGIN=1 (вход по роли без пароля), RVM_PASSWORD_<ЛОГИН> (хэши паролей)."""
+    env = os.environ
+    db = db or Path(env.get("RVM_DB", "var/rvm.sqlite"))
     store.init(db)
-    llm = llm or LLMClient()
+    if llm is None:
+        if env.get("LLM_MODE", "live") == "live" and not env.get("LLM_API_KEY"):
+            log.warning("LLM_API_KEY не задан — режим demo: ответы модели только из кэша")
+            llm = LLMClient(mode="demo")
+        else:
+            llm = LLMClient()
+    if not env.get("RVM_SECRET"):
+        log.warning("RVM_SECRET не задан — ключ сессий случайный, вход сбросится при перезапуске")
+    secret = env.get("RVM_SECRET", "").encode() or secrets.token_bytes(32)
+    demo_login = env.get("RVM_DEMO_LOGIN") == "1"
+    if demo_login:
+        log.warning("RVM_DEMO_LOGIN=1 — вход по роли без пароля открыт любому")
+    hosts = ["localhost", "127.0.0.1"] + [
+        h.strip() for h in env.get("RVM_ALLOWED_HOSTS", "").split(",") if h.strip()
+    ]
     llm.purge_expired()
     fixed_today = today or (
         date.fromisoformat(os.environ["RVM_TODAY"]) if os.environ.get("RVM_TODAY") else None
@@ -201,6 +289,19 @@ def create_app(
         description="Сопоставление резюме и вакансий: статусы требований с цитатами, балл, "
         "рейтинг, выводы. Модель читает, код решает.",
     )
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next: Any) -> Any:
+        path = request.url.path
+        if path.startswith("/api/"):
+            if request.method not in SAFE_METHODS and not request.headers.get("x-requested-with"):
+                return JSONResponse({"detail": "нужен заголовок X-Requested-With"}, 403)
+            request.state.user = auth.read(secret, request.cookies.get(auth.COOKIE))
+            if request.state.user is None and path not in OPEN_PATHS:
+                return JSONResponse({"detail": "нужен вход"}, 401)
+        return await call_next(request)
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)  # снаружи guard
 
     def set_file(f: UploadFileState, **kw: Any) -> None:
         with lock:
@@ -257,6 +358,46 @@ def create_app(
     def not_found(e: KeyError) -> HTTPException:
         return HTTPException(404, str(e.args[0]) if e.args else "не найдено")
 
+    def visible_card(user: auth.User, candidate_id: int) -> dict[str, Any]:
+        """Карточка; руководителю — только кандидаты «у заказчика»."""
+        try:
+            c = store.card(db, candidate_id)
+        except KeyError as e:
+            raise not_found(e) from e
+        if user.role == "manager" and c["status"] != CandidateStatus.CUST:
+            raise HTTPException(404, f"нет кандидата {candidate_id}")
+        return c
+
+    # --- вход ---
+
+    @app.post("/api/login", summary="Вход: логин и пароль или демо-вход по роли")
+    def login(body: LoginBody, response: Response) -> auth.User:
+        if body.role:
+            if not demo_login:
+                raise HTTPException(403, "демо-вход отключён")
+            user = auth.demo_user(body.role)
+        else:
+            user = auth.check_password(body.login, body.password)
+        if user is None:
+            raise HTTPException(401, "неверный логин или пароль")
+        token = auth.issue(secret, user)
+        # shortcut: без Secure — стенд за Caddy и localhost по http; включить, если только https
+        response.set_cookie(auth.COOKIE, token, max_age=auth.MAX_AGE, httponly=True, samesite="lax")
+        return user
+
+    @app.get("/api/login-options", summary="Показывать ли кнопки демо-входа")
+    def login_options() -> dict[str, bool]:
+        return {"demo": demo_login}
+
+    @app.post("/api/logout", summary="Выход")
+    def logout(response: Response, _: Anyone) -> dict[str, bool]:
+        response.delete_cookie(auth.COOKIE)
+        return {"ok": True}
+
+    @app.get("/api/me", summary="Кто вошёл")
+    def me(user: Anyone) -> auth.User:
+        return user
+
     # --- загрузки ---
 
     @app.post(
@@ -269,16 +410,23 @@ def create_app(
     )
     def upload(
         files: Annotated[list[UploadFile], File(description="резюме или zip")],
+        _: Recruiter,
         applied: Annotated[str | None, Query(description="id вакансии отклика")] = None,
     ) -> BatchCreated:
         items: list[tuple[UploadFileState, bytes]] = []
+        used = 0
         for up in files:
             name = up.filename or "файл"
+            if (up.size or 0) > MAX_REQUEST_BYTES - used:  # сырой размер — до чтения
+                raise _too_big()
             try:
-                parts = _unpack(name, up.file.read())
+                parts = _unpack(name, up.file.read(), MAX_REQUEST_BYTES - used)
             except ValueError as e:
                 items.append((UploadFileState(name=name, state="error", message=str(e)), b""))
                 continue
+            used += sum(len(d) for _, d in parts)
+            if used > MAX_REQUEST_BYTES:
+                raise _too_big()
             items += [(UploadFileState(name=n, state="queued"), d) for n, d in parts]
             if len(items) > MAX_BATCH:
                 raise HTTPException(413, f"в пачке больше {MAX_BATCH} файлов")
@@ -291,7 +439,7 @@ def create_app(
         return BatchCreated(batch_id=bid, files=len(items))
 
     @app.get("/api/uploads/{batch_id}", summary="Прогресс пачки по файлам")
-    def batch(batch_id: str) -> Batch:
+    def batch(batch_id: str, _: Recruiter) -> Batch:
         with lock:
             if batch_id not in batches:
                 raise HTTPException(404, "нет такой пачки")
@@ -312,7 +460,7 @@ def create_app(
         )
 
     @app.get("/api/vacancies", summary="Список вакансий с итогом сверки резерва")
-    def vacancies() -> list[VacancyItem]:
+    def vacancies(_: Anyone) -> list[VacancyItem]:
         return [vacancy_item(v) for v in store.list_vacancies(db)]
 
     @app.post(
@@ -323,6 +471,7 @@ def create_app(
         "reserve_matches в списке вакансий — кто подходит хотя бы частично.",
     )
     def add_vacancy(
+        _: Recruiter,
         file: Annotated[UploadFile | None, File(description="файл вакансии")] = None,
         text: Annotated[str | None, Form(description="текст вакансии")] = None,
     ) -> VacancyItem:
@@ -340,9 +489,9 @@ def create_app(
         return vacancy_item(next(v for v in store.list_vacancies(db) if v["id"] == vid))
 
     @app.post("/api/vacancies/{vacancy_id}/close", summary="Закрыть вакансию")
-    def close_vacancy(vacancy_id: str) -> dict[str, bool]:
+    def close_vacancy(vacancy_id: str, user: Recruiter) -> dict[str, bool]:
         try:
-            store.close_vacancy(db, vacancy_id)
+            store.close_vacancy(db, vacancy_id, who=user.who)
         except KeyError as e:
             raise not_found(e) from e
         return {"ok": True}
@@ -351,23 +500,23 @@ def create_app(
 
     @app.get("/api/candidates", summary="База кандидатов: поиск, фильтр по статусу, сортировка")
     def candidates(
+        user: Anyone,
         status: CandidateStatus | None = None,
         q: Annotated[str | None, Query(description="поиск по должности и навыкам")] = None,
         sort: Literal["score", "date"] = "score",
     ) -> list[CandidateItem]:
+        if user.role == "manager":
+            status = CandidateStatus.CUST
         return [CandidateItem(**c) for c in store.list_candidates(db, status, q, sort)]
 
     @app.get("/api/candidates/{candidate_id}", summary="Карточка: версии, оценки, история")
-    def candidate(candidate_id: int) -> Card:
-        try:
-            return Card(**store.card(db, candidate_id))
-        except KeyError as e:
-            raise not_found(e) from e
+    def candidate(candidate_id: int, user: Anyone) -> Card:
+        return Card(**visible_card(user, candidate_id))
 
     @app.patch("/api/candidates/{candidate_id}", summary="Сменить статус кандидата")
-    def change_status(candidate_id: int, body: StatusChange) -> dict[str, bool]:
+    def change_status(candidate_id: int, body: StatusChange, user: Recruiter) -> dict[str, bool]:
         try:
-            store.set_status(db, candidate_id, body.status)
+            store.set_status(db, candidate_id, body.status, who=user.who)
         except KeyError as e:
             raise not_found(e) from e
         return {"ok": True}
@@ -377,12 +526,54 @@ def create_app(
         status_code=204,
         summary="Удалить кандидата со всеми данными",
     )
-    def delete(candidate_id: int) -> Response:
+    def delete(candidate_id: int, user: Recruiter) -> Response:
         try:
-            store.delete_candidate(db, candidate_id)
+            store.delete_candidate(db, candidate_id, who=user.who)
         except KeyError as e:
             raise not_found(e) from e
         return Response(status_code=204)
+
+    @app.post(
+        "/api/candidates/{candidate_id}/manager-decision",
+        summary="Решение руководителя: пригласить на интервью или «не подходит»",
+        description="Только для кандидата «у заказчика» (иначе 404); статус → invited / cust_rejected, "
+        "комментарий и имя руководителя — в журнале.",
+    )
+    def manager_decision(candidate_id: int, body: Decision, user: Manager) -> dict[str, bool]:
+        visible_card(user, candidate_id)  # руководителю видны только «у заказчика»
+        new = (
+            CandidateStatus.INVITED if body.decision == "invite" else CandidateStatus.CUST_REJECTED
+        )
+        store.set_status(
+            db, candidate_id, new, who=user.who, decision=body.decision, comment=body.comment
+        )
+        return {"ok": True}
+
+    @app.post(
+        "/api/candidates/{candidate_id}/merge",
+        summary="Повтор: объединить карточку other с этой",
+    )
+    def merge(candidate_id: int, body: MergeBody, user: Recruiter) -> dict[str, bool]:
+        try:
+            store.merge_candidates(db, candidate_id, body.other, who=user.who)
+        except KeyError as e:
+            raise not_found(e) from e
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"ok": True}
+
+    @app.post(
+        "/api/candidates/{candidate_id}/dismiss-duplicate",
+        summary="Повтор: это разные люди",
+    )
+    def dismiss_duplicate(candidate_id: int, user: Recruiter) -> dict[str, bool]:
+        try:
+            store.dismiss_duplicate(db, candidate_id, who=user.who)
+        except KeyError as e:
+            raise not_found(e) from e
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"ok": True}
 
     # --- оценки ---
 
@@ -398,15 +589,21 @@ def create_app(
         description="Отчёт по последней версии резюме: вакансии в порядке рейтинга, "
         "переадресация, факты, исходный текст для показа.",
     )
-    def evaluations(candidate: int) -> Report:
+    def evaluations(candidate: int, user: Anyone) -> Report:
         try:
-            rid = store.card(db, candidate)["versions"][0]["id"]
-        except (KeyError, IndexError) as e:
+            rid = visible_card(user, candidate)["versions"][0]["id"]
+        except IndexError as e:
             raise HTTPException(404, "нет кандидата или резюме") from e
         return report_of(rid)
 
     @app.get("/api/evaluations/{resume_id}/{vacancy_id}", summary="Отчёт по паре")
-    def pair(resume_id: int, vacancy_id: str) -> Pair:
+    def pair(resume_id: int, vacancy_id: str, user: Anyone) -> Pair:
+        if user.role == "manager" and resume_id not in {
+            v["id"]
+            for c in store.list_candidates(db, CandidateStatus.CUST)
+            for v in store.card(db, c["id"])["versions"]
+        }:
+            raise HTTPException(404, f"нет резюме {resume_id}")
         report = report_of(resume_id)
         result = next((v for v in report.vacancies if v.id == vacancy_id), None)
         if result is None:
@@ -416,12 +613,25 @@ def create_app(
     @app.patch(
         "/api/evaluations/{resume_id}/{vacancy_id}/rows/{requirement_id}",
         summary="Ответ на вопрос или правка строки",
-        description="Строка получает статус с флагом «со слов кандидата»; балл, вилка и места "
-        "вакансий пересчитываются, событие пишется в журнал.",
+        description="Строка получает статус с флагом «со слов кандидата» (by=candidate) или "
+        "«изменено рекрутером» (by=recruiter); балл, вилка и места вакансий пересчитываются, "
+        "событие пишется в журнал. Ответ на проверку D…/SNAPSHOT балл не меняет.",
     )
-    def answer(resume_id: int, vacancy_id: str, requirement_id: str, body: RowAnswer) -> PairScore:
+    def answer(
+        resume_id: int, vacancy_id: str, requirement_id: str, body: RowAnswer, user: Recruiter
+    ) -> PairScore:
+        flag = store.BY_RECRUITER if body.by == "recruiter" else store.FROM_CANDIDATE
         try:
-            return store.answer(db, resume_id, vacancy_id, requirement_id, body.status, body.note)
+            return store.answer(
+                db,
+                resume_id,
+                vacancy_id,
+                requirement_id,
+                body.status,
+                body.note,
+                who=user.who,
+                flag=flag,
+            )
         except KeyError as e:
             raise not_found(e) from e
 

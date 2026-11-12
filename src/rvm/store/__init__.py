@@ -1,6 +1,7 @@
 """База кандидатов, резюме, вакансий и оценок (SQLite)."""
 
 from rvm.store.db import (
+    BY_RECRUITER,
     CLARIFIED,
     FROM_CANDIDATE,
     Added,
@@ -25,6 +26,7 @@ from rvm.store.db import (
 )
 
 __all__ = [
+    "BY_RECRUITER",
     "CLARIFIED",
     "FROM_CANDIDATE",
     "Added",
