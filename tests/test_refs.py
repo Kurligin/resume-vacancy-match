@@ -96,3 +96,25 @@ def test_profstandards() -> None:
     assert 5 <= len(profstandards.functions("08.002")) <= 10
     assert profstandards.functions("99.999") == []
     assert all(s.source.startswith("http") for s in profstandards.standards())
+
+
+def test_hh_synonym_rule() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "scripts" / "build_skill_refs.py"
+    spec = importlib.util.spec_from_file_location("build_skill_refs", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    got = mod.pick_synonyms(
+        "Excel",
+        ["Excel", "ms excel"],
+        ["MS Excel 2016", "Excel VBA", "Microsoft Excel"],
+        lambda s: None,
+    )
+    assert got == ["MS Excel 2016", "Microsoft Excel"]
+    assert mod.pick_synonyms("Java", ["Java"], ["JavaScript"], lambda s: None) == []
+    assert mod.pick_synonyms("Vue", ["Vue"], ["VueJS"], skills.canonical) == []
+    assert mod.pick_synonyms("SQL", ["SQL"], ["Ms SQL 2000"], skills.canonical) == []
+    assert mod.pick_synonyms("PHP", ["PHP"], ["PHP5"], {"PHP": "PHP"}.get) == ["PHP5"]
