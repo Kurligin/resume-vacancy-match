@@ -50,15 +50,35 @@
  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1"/></symbol>
 </svg>
 
+<div class="login" id="login" hidden>
+  <div class="lg">
+    <span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>
+    <h1>Сверка</h1>
+    <div class="tag">Подбор вакансий МФТИ по резюме</div>
+    <form class="card lgc" id="lgform">
+      <label class="fld"><span>Логин</span><input name="login" autocomplete="username" aria-label="Логин" required></label>
+      <label class="fld"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" aria-label="Пароль" required></label>
+      <div class="lgerr" id="lgerr" role="alert"></div>
+      <button class="btn btn-primary" type="submit">Войти</button>
+    </form>
+    <div id="demo" hidden>
+      <div class="demo-h">Демо-доступ — вход в один клик</div>
+      <button class="role" data-login="recruiter"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span><b>Рекрутер</b><small>Анна Смирнова · разбор откликов, кандидаты, вакансии</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
+      <button class="role" data-login="manager"><span class="avatar green"><svg class="i"><use href="#i-brief"/></svg></span><span><b>Нанимающий руководитель</b><small>Олег Волков · кандидаты, которых прислал рекрутер</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
+    </div>
+  </div>
+</div>
+
 <header class="bar">
   <a class="logo" href="#/candidates"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>Сверка</a>
   <nav class="nav" aria-label="Разделы">
-    <a class="navlink" href="#/triage" data-sec="triage"><svg class="i"><use href="#i-inbox"/></svg>Разбор</a>
+    <a class="navlink" href="#/triage" data-sec="triage" data-rec><svg class="i"><use href="#i-inbox"/></svg>Разбор<span class="badge num" id="trbadge"></span></a>
     <a class="navlink" href="#/candidates" data-sec="candidates"><svg class="i"><use href="#i-users"/></svg>Кандидаты<span class="badge num" id="navbadge"></span></a>
-    <a class="navlink" href="#/vacancies" data-sec="vacancies"><svg class="i"><use href="#i-brief"/></svg>Вакансии</a>
+    <a class="navlink" href="#/vacancies" data-sec="vacancies" data-rec><svg class="i"><use href="#i-brief"/></svg>Вакансии</a>
   </nav>
   <span class="spacer"></span>
-  <button class="btn btn-primary" data-upload><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
+  <button class="btn btn-primary" data-upload data-rec><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
+  <span class="me"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span id="mename"></span><button id="logout">Выйти</button></span>
 </header>
 
 <main class="wrap">
@@ -69,7 +89,7 @@
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" data-tab="req"><svg class="i"><use href="#i-list"/></svg>Требования</button>
         <button role="tab" aria-selected="false" data-tab="qs"><svg class="i"><use href="#i-chat"/></svg>Вопросы <span class="cnt num" id="qcnt"></span></button>
-        <button role="tab" aria-selected="false" data-tab="mail"><svg class="i"><use href="#i-mail"/></svg>Письмо</button>
+        <button role="tab" aria-selected="false" data-tab="mail" data-rec><svg class="i"><use href="#i-mail"/></svg>Письмо</button>
       </div>
       <div class="pane" id="pane"></div>
     </div>

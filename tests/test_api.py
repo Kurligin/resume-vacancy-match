@@ -230,6 +230,16 @@ def test_ui_static(api: TestClient) -> None:
     assert "http" not in js.text.replace("/api/", "")  # без CDN: работает без интернета
 
 
+def test_ui_login_screen(app: FastAPI) -> None:
+    """Страница и скрипт отдаются без сессии; экран входа в разметке; заголовок защиты в fetch."""
+    with TestClient(app, base_url="http://localhost") as anon:
+        page, js = anon.get("/"), anon.get("/app.js")
+        assert page.status_code == 200 and js.status_code == 200
+        assert 'id="login"' in page.text and 'id="logout"' in page.text
+        assert '"X-Requested-With": "fetch"' in js.text
+        assert anon.get("/api/me").status_code == 401
+
+
 def test_password_hash() -> None:
     h = auth.hash_password("секрет")
     assert h.startswith("scrypt:") and "секрет" not in h
