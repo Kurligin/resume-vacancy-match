@@ -59,6 +59,7 @@ class VacancyResult(BaseModel):
     insights: Insights | None = None
     questions: Questions | None = None
     letters: list[Letter] = Field(default_factory=list)
+    clarified: dict[str, str] = Field(default_factory=dict)  # id проверки → пометка рекрутера
 
 
 class Facts(BaseModel):

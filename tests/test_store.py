@@ -9,6 +9,7 @@ import pytest
 from rvm import store
 from rvm.models import Document, Line, MatchRow, ReqKind, Requirement, Section, Status
 from rvm.pipeline.analyze import Report, ReportStatus, ResumeView, VacancyResult
+from rvm.pipeline.explain import Insights, Point
 from rvm.privacy import Masked, mask
 from rvm.scoring import rank_vacancies, score_pair
 
@@ -84,15 +85,109 @@ def test_same_file_twice_one_version(db: Path) -> None:
     assert len(store.card(db, a.candidate_id)["versions"]) == 1
 
 
-def test_other_file_same_phone_one_card_two_versions(db: Path) -> None:
+def test_other_file_same_phone_new_card_flagged(db: Path) -> None:
     d1 = doc("Python-разработчик", f"Телефон {PHONE}")
     d2 = doc("Senior Python", "Тел.: 8 999 123 45 67", "ivan@example.com")
     a = store.add_resume(db, b"v1", d1, mask(d1))
     b = store.add_resume(db, b"v2", d2, mask(d2))
-    assert a.candidate_id == b.candidate_id and a.resume_id != b.resume_id and b.new
-    assert len(store.card(db, a.candidate_id)["versions"]) == 2
+    assert a.candidate_id != b.candidate_id and b.new
+    second = store.card(db, b.candidate_id)
+    assert second["possible_duplicate_of"] == a.candidate_id
+    ev = [e for e in second["events"] if e["type"] == "possible_duplicate"]
+    assert ev[0]["details"] == {"of": a.candidate_id} and ev[0]["who"] == "система"
+    assert store.card(db, a.candidate_id)["possible_duplicate_of"] is None
     other = doc("Аналитик", "Телефон +7 912 000-00-00")
-    assert store.add_resume(db, b"v3", other, mask(other)).candidate_id != a.candidate_id
+    c = store.add_resume(db, b"v3", other, mask(other))
+    assert store.card(db, c.candidate_id)["possible_duplicate_of"] is None
+
+
+def test_merge_candidates(db: Path) -> None:
+    d1 = doc("Python-разработчик", f"Телефон {PHONE}")
+    d2 = doc("Senior Python", f"Тел. {PHONE}")
+    a = store.add_resume(db, b"v1", d1, mask(d1))
+    b = store.add_resume(db, b"v2", d2, mask(d2))
+    store.save_report(db, b.resume_id, report(d2.name, {"v1": {"r1": Status.FULL}}))
+    store.merge_candidates(db, a.candidate_id, b.candidate_id)
+
+    assert [c["id"] for c in store.list_candidates(db)] == [a.candidate_id]
+    card = store.card(db, a.candidate_id)
+    assert [v["id"] for v in card["versions"]] == [b.resume_id, a.resume_id]
+    assert card["evaluations"][0]["resume_id"] == b.resume_id
+    types = [e["type"] for e in card["events"]]
+    assert {"uploaded", "evaluated", "possible_duplicate", "merged"} <= set(types)
+    merged = next(e for e in card["events"] if e["type"] == "merged")
+    assert merged["who"] == "рекрутер" and merged["details"] == {"from": b.candidate_id}
+    with pytest.raises(KeyError):
+        store.card(db, b.candidate_id)
+    # тот же телефон после склейки — снова пометка на ту же карточку
+    d3 = doc("Python", f"Телефон {PHONE}")
+    c = store.add_resume(db, b"v3", d3, mask(d3))
+    assert store.card(db, c.candidate_id)["possible_duplicate_of"] == a.candidate_id
+    with pytest.raises(ValueError):
+        store.merge_candidates(db, a.candidate_id, a.candidate_id)
+    with pytest.raises(KeyError):
+        store.merge_candidates(db, a.candidate_id, 999)
+
+
+def test_dismiss_duplicate(db: Path) -> None:
+    d1 = doc("Python", f"Телефон {PHONE}")
+    d2 = doc("Аналитик", f"Телефон {PHONE}")
+    a = store.add_resume(db, b"v1", d1, mask(d1))
+    b = store.add_resume(db, b"v2", d2, mask(d2))
+    store.dismiss_duplicate(db, b.candidate_id)
+    card = store.card(db, b.candidate_id)
+    assert card["possible_duplicate_of"] is None
+    ev = [e for e in card["events"] if e["type"] == "not_duplicate"]
+    assert ev[0]["details"] == {"of": a.candidate_id}
+    with pytest.raises(ValueError):
+        store.dismiss_duplicate(db, b.candidate_id)
+
+
+def test_deleted_id_not_reused(db: Path) -> None:
+    ids = [
+        store.add_resume(db, f"f{i}".encode(), doc(f"r{i}"), masked(doc("x"), [])) for i in range(5)
+    ]
+    last = ids[-1]
+    store.delete_candidate(db, last.candidate_id)
+    new = store.add_resume(db, b"f-new", doc("new"), masked(doc("new"), []))
+    assert new.candidate_id > last.candidate_id and new.resume_id > last.resume_id
+
+
+def test_migration_from_v1_keeps_data(tmp_path: Path) -> None:
+    path = tmp_path / "old.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(store.db._MIGRATIONS[0] + "PRAGMA user_version=1;")
+        conn.execute("INSERT INTO candidates (id, created_at, source) VALUES (3, 'x', 'файл')")
+        conn.execute(
+            "INSERT INTO resumes (id, candidate_id, sha256, name, status, lines, original,"
+            " created_at) VALUES (4, 3, 's', 'n', 'ok', '[]', '[]', 'x')"
+        )
+        conn.execute(
+            "INSERT INTO events (at, type, candidate_id, who, details)"
+            " VALUES ('x', 'deleted', 7, 'рекрутер', '{}')"
+        )
+    store.init(path)
+    store.init(path)
+    assert store.card(path, 3)["versions"][0]["id"] == 4
+    a = store.add_resume(path, b"new", doc("new"), masked(doc("new"), []))
+    assert a.candidate_id == 8 and a.resume_id == 5  # 4–7 заняты, в том числе удалённой 7
+
+
+def test_cleanup_busy_raises(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store.db, "_CLEANUP_S", 0.3)
+    a = store.add_resume(db, b"a", doc("a"), masked(doc("a"), ["h"]))
+    reader = sqlite3.connect(db, isolation_level=None)
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM candidates").fetchone()
+        with pytest.raises(store.CleanupError):
+            store.delete_candidate(db, a.candidate_id)
+        reader.execute("COMMIT")
+    finally:
+        reader.close()
+    store.cleanup(db)  # читатель ушёл — очистка проходит
+    with pytest.raises(KeyError):
+        store.card(db, a.candidate_id)
 
 
 def test_status_change_writes_event(db: Path) -> None:
@@ -160,6 +255,33 @@ def test_answer_unknown_to_full_recomputes(db: Path) -> None:
     ev = [e for e in store.card(db, a.candidate_id)["events"] if e["type"] == "answer"]
     assert ev[0]["details"]["requirement"] == "r2" and ev[0]["details"]["after"] == after.score
     assert ev[0]["vacancy_id"] == "v1"
+
+
+def test_answer_on_check_keeps_score(db: Path) -> None:
+    d = doc("Python")
+    a = store.add_resume(db, b"a", d, masked(d, ["h"]))
+    rep = report(d.name, {"v1": {"r1": Status.FULL, "r2": Status.UNKNOWN}, "v2": {"r1": Status.NO}})
+    risk = Point(text="Резюме составлено давно", refs=["SNAPSHOT"])
+    for v in rep.vacancies:
+        v.insights = Insights(
+            strengths=[],
+            risks=[risk, Point(text="Нет данных по r2", refs=["r2"])],
+            recommendation=Point(text="звать", refs=["VERDICT"]),
+        )
+    store.save_report(db, a.resume_id, rep)
+    before = {v.id: v.score for v in store.load_report(db, a.resume_id).vacancies}
+
+    after = store.answer(db, a.resume_id, "v1", "SNAPSHOT", Status.FULL, note="резюме актуально")
+    assert after == before["v1"]
+    for v in store.load_report(db, a.resume_id).vacancies:
+        assert v.score == before[v.id]
+        assert v.clarified == {"SNAPSHOT": f"{store.CLARIFIED}: резюме актуально"}
+        assert v.insights is not None and [r.refs for r in v.insights.risks] == [["r2"]]
+    ev = [e for e in store.card(db, a.candidate_id)["events"] if e["type"] == "clarified"]
+    assert ev[0]["details"] == {"check": "SNAPSHOT"}
+    assert ev[0]["vacancy_id"] == "v1"
+    with pytest.raises(KeyError):
+        store.answer(db, a.resume_id, "v1", "D7", Status.FULL)
 
 
 def test_delete_erases_everything(db: Path) -> None:

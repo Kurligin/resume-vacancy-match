@@ -5,7 +5,9 @@
 
 import hashlib
 import json
+import re
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -17,14 +19,17 @@ from pydantic import TypeAdapter
 
 from rvm.models import Document, Line, MatchRow, Status
 from rvm.pipeline.analyze import Report, ResumeView, VacancyResult, title_of
+from rvm.pipeline.explain import SNAPSHOT_ID
 from rvm.privacy import Masked
 from rvm.scoring import PairScore, rank_vacancies, score_pair
 
 FROM_CANDIDATE = "со слов кандидата"
+CLARIFIED = "прояснено со слов кандидата"
 RECRUITER = "рекрутер"
 _LINES = TypeAdapter(list[Line])
-_SCHEMA_VERSION = 1
-_SCHEMA = """
+_CHECK_ID = re.compile(rf"D\d+|{SNAPSHOT_ID}")
+_CLEANUP_S = 2.0  # сколько ждать читателей, чтобы обрезать журнал после удаления
+_V1 = """
 CREATE TABLE candidates (
     id INTEGER PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'new',
@@ -80,6 +85,41 @@ CREATE TABLE events (
 CREATE INDEX resumes_candidate ON resumes(candidate_id);
 CREATE INDEX events_candidate ON events(candidate_id);
 """
+# v2: номера карточек и резюме не переиспользуются (AUTOINCREMENT, в том числе номера из записей
+# «удалён»); пометка «возможный повтор» вместо автосклейки по контакту
+_V2 = """
+CREATE TABLE candidates_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    possible_duplicate_of INTEGER REFERENCES candidates(id) ON DELETE SET NULL
+);
+INSERT INTO candidates_new (id, status, created_at, source)
+    SELECT id, status, created_at, source FROM candidates;
+DROP TABLE candidates;
+ALTER TABLE candidates_new RENAME TO candidates;
+CREATE TABLE resumes_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    sha256 TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    lines TEXT NOT NULL,      -- обезличенные строки (JSON)
+    original TEXT NOT NULL,   -- исходные строки (JSON), только для показа рекрутеру
+    analysis TEXT,            -- Report без резюме и вакансий: факты, переадресация, ...
+    created_at TEXT NOT NULL
+);
+INSERT INTO resumes_new SELECT * FROM resumes;
+DROP TABLE resumes;
+ALTER TABLE resumes_new RENAME TO resumes;
+CREATE INDEX resumes_candidate ON resumes(candidate_id);
+INSERT INTO sqlite_sequence (name, seq) SELECT 'candidates', 0
+    WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='candidates');
+UPDATE sqlite_sequence SET seq=max(seq, (SELECT coalesce(max(candidate_id), 0) FROM events))
+    WHERE name='candidates';
+"""
+_MIGRATIONS = [_V1, _V2]  # user_version = число применённых
 
 
 class CandidateStatus(StrEnum):
@@ -90,6 +130,10 @@ class CandidateStatus(StrEnum):
     INVITED = "invited"
     RESERVE = "reserve"
     REJECTED = "rejected"
+
+
+class CleanupError(RuntimeError):
+    """Удаление записано, но журнал WAL не обрезан: стёртое ещё лежит в файле журнала."""
 
 
 class Added(NamedTuple):
@@ -146,8 +190,12 @@ def init(db: Path) -> None:
     conn = sqlite3.connect(db, isolation_level=None)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        if conn.execute("PRAGMA user_version").fetchone()[0] < _SCHEMA_VERSION:
-            conn.executescript(f"BEGIN; {_SCHEMA} PRAGMA user_version={_SCHEMA_VERSION}; COMMIT;")
+        done = conn.execute("PRAGMA user_version").fetchone()[0]
+        for v, script in enumerate(_MIGRATIONS[done:], done + 1):
+            # без внешних ключей: пересборка таблицы иначе каскадом сотрёт зависимые строки
+            conn.executescript(
+                f"PRAGMA foreign_keys=OFF; BEGIN; {script} PRAGMA user_version={v}; COMMIT;"
+            )
     finally:
         conn.close()
 
@@ -156,23 +204,22 @@ def init(db: Path) -> None:
 
 
 def add_resume(db: Path, data: bytes, doc: Document, masked: Masked, source: str = "файл") -> Added:
-    """Тот же файл → та же версия; другой файл с общим телефоном или почтой → новая версия той
-    же карточки; иначе новая карточка."""
+    """Тот же файл → та же версия; иначе новая карточка. Общий телефон или почта с другой
+    карточкой → пометка «возможный повтор», склеивает только рекрутер (merge_candidates)."""
     sha = hashlib.sha256(data).hexdigest()
     with _tx(db) as conn:
         row = conn.execute("SELECT id, candidate_id FROM resumes WHERE sha256=?", (sha,)).fetchone()
         if row:
             return Added(row["candidate_id"], row["id"], False)
         hashes = masked.contact_hashes
-        found = conn.execute(
+        dup = conn.execute(
             f"SELECT min(candidate_id) FROM contacts WHERE hash IN ({','.join('?' * len(hashes))})",
             hashes,
         ).fetchone()[0]
-        cid = found  # совпали контакты с несколькими карточками — берём старшую, не сливаем
-        if cid is None:
-            cid = conn.execute(
-                "INSERT INTO candidates (created_at, source) VALUES (?, ?)", (_now(), source)
-            ).lastrowid
+        cid = conn.execute(
+            "INSERT INTO candidates (created_at, source, possible_duplicate_of) VALUES (?, ?, ?)",
+            (_now(), source, dup),
+        ).lastrowid
         conn.executemany(
             "INSERT OR IGNORE INTO contacts (hash, candidate_id) VALUES (?, ?)",
             [(h, cid) for h in hashes],
@@ -190,12 +237,47 @@ def add_resume(db: Path, data: bytes, doc: Document, masked: Masked, source: str
                 _now(),
             ),
         ).lastrowid
-        version = conn.execute(
-            "SELECT count(*) FROM resumes WHERE candidate_id=?", (cid,)
-        ).fetchone()[0]
-        _event(conn, "uploaded", cid, who="система", resume_id=rid, version=version)
+        _event(conn, "uploaded", cid, who="система", resume_id=rid)
+        if dup is not None:
+            _event(conn, "possible_duplicate", cid, who="система", of=dup)
         assert cid is not None and rid is not None
         return Added(cid, rid, True)
+
+
+def merge_candidates(db: Path, keep: int, drop: int, who: str = RECRUITER) -> None:
+    """Рекрутер подтвердил «один человек»: версии, оценки, контакты и журнал drop → keep."""
+    if keep == drop:
+        raise ValueError("нельзя объединить карточку с самой собой")
+    with _tx(db) as conn:
+        n = conn.execute("SELECT count(*) FROM candidates WHERE id IN (?, ?)", (keep, drop))
+        if n.fetchone()[0] < 2:
+            raise KeyError(f"нет кандидата {keep} или {drop}")
+        for table in ("resumes", "contacts", "events"):
+            conn.execute(f"UPDATE {table} SET candidate_id=? WHERE candidate_id=?", (keep, drop))
+        conn.execute(
+            "UPDATE candidates SET possible_duplicate_of=NULL WHERE id=? AND possible_duplicate_of=?",
+            (keep, drop),
+        )
+        conn.execute(
+            "UPDATE candidates SET possible_duplicate_of=? WHERE possible_duplicate_of=?",
+            (keep, drop),
+        )
+        conn.execute("DELETE FROM candidates WHERE id=?", (drop,))
+        _event(conn, "merged", keep, who=who, **{"from": drop})
+
+
+def dismiss_duplicate(db: Path, candidate_id: int, who: str = RECRUITER) -> None:
+    """Рекрутер решил «разные люди»: пометка «возможный повтор» снимается."""
+    with _tx(db) as conn:
+        row = conn.execute(
+            "SELECT possible_duplicate_of FROM candidates WHERE id=?", (candidate_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"нет кандидата {candidate_id}")
+        if row[0] is None:
+            raise ValueError(f"у кандидата {candidate_id} нет пометки «возможный повтор»")
+        conn.execute("UPDATE candidates SET possible_duplicate_of=NULL WHERE id=?", (candidate_id,))
+        _event(conn, "not_duplicate", candidate_id, who=who, of=row[0])
 
 
 def save_report(db: Path, resume_id: int, report: Report) -> None:
@@ -350,7 +432,8 @@ def answer(
     who: str = RECRUITER,
 ) -> PairScore:
     """Ответ кандидата на вопрос: строка получает статус с флагом «со слов кандидата», балл,
-    вилка и места вакансий пересчитываются."""
+    вилка и места вакансий пересчитываются. Ответ на проверку (D…, SNAPSHOT) балл не меняет:
+    несостыковка помечается «прояснено со слов кандидата» и уходит из рисков."""
     with _tx(db) as conn:
         cid = _candidate_of(conn, resume_id)
         rows = conn.execute(
@@ -365,7 +448,11 @@ def answer(
             raise KeyError(f"нет оценки резюме {resume_id} по вакансии {vacancy_id}")
         res = results[vacancy_id][0]
         if requirement_id not in {r.id for r in res.requirements}:
-            raise KeyError(f"нет требования {requirement_id}")
+            if not _CHECK_ID.fullmatch(requirement_id):
+                raise KeyError(f"нет требования {requirement_id}")
+            _clarify(conn, resume_id, results, requirement_id, note)
+            _event(conn, "clarified", cid, vacancy_id, who=who, check=requirement_id)
+            return res.score
         row = next((r for r in res.rows if r.requirement_id == requirement_id), None)
         if row is None:
             row = MatchRow(requirement_id=requirement_id, status=Status.UNKNOWN)
@@ -407,6 +494,30 @@ def answer(
         return res.score
 
 
+def _clarify(
+    conn: sqlite3.Connection,
+    resume_id: int,
+    results: dict[str, tuple[VacancyResult, sqlite3.Row]],
+    check_id: str,
+    note: str,
+) -> None:
+    """Несостыковка — про резюме, а не про вакансию: помечается во всех оценках, где она есть."""
+    mark = f"{CLARIFIED}: {note}" if note else CLARIFIED
+    found = False
+    for v, m in results.values():
+        risks = v.insights.risks if v.insights else []
+        asked = v.questions.items if v.questions else []
+        if check_id not in {x for p in risks for x in p.refs} | {q.requirement_id for q in asked}:
+            continue
+        found = True
+        v.clarified[check_id] = mark
+        if v.insights:  # пункт уходит, только если все его ссылки прояснены
+            v.insights.risks = [p for p in risks if not set(p.refs) <= set(v.clarified)]
+        _put_eval(conn, resume_id, v, m["model"], m["prompt_versions"])
+    if not found:
+        raise KeyError(f"нет проверки {check_id}")
+
+
 def delete_candidate(db: Path, candidate_id: int, who: str = RECRUITER) -> None:
     """Стирает карточку, версии, тексты, оценки, хэши и журнал; остаётся запись «удалён»."""
     with _tx(db) as conn:
@@ -414,10 +525,25 @@ def delete_candidate(db: Path, candidate_id: int, who: str = RECRUITER) -> None:
             raise KeyError(f"нет кандидата {candidate_id}")
         conn.execute("DELETE FROM events WHERE candidate_id=?", (candidate_id,))
         _event(conn, "deleted", candidate_id, who=who)
-    # стёртые страницы ещё лежат в журнале WAL — переносим в базу и обрезаем журнал
-    conn = sqlite3.connect(db)
+    cleanup(db)
+
+
+def cleanup(db: Path) -> None:
+    """Стёртые страницы ещё лежат в журнале WAL — переносим в базу и обрезаем журнал. Читатели
+    держат журнал — повторяем до _CLEANUP_S, потом CleanupError, а не тихий успех."""
+    deadline = time.monotonic() + _CLEANUP_S
+    conn = sqlite3.connect(db, timeout=0.1, isolation_level=None)
     try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        while True:
+            try:
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            except sqlite3.OperationalError:  # база занята писателем
+                busy = 1
+            if not busy:
+                return
+            if time.monotonic() > deadline:
+                raise CleanupError(f"журнал не очищен за {_CLEANUP_S} с: база занята")
+            time.sleep(0.05)
     finally:
         conn.close()
 
