@@ -1,0 +1,31 @@
+# docker compose up — демо без ключа: вход по роли, демо-данные, ответы модели из кэша.
+# Свои настройки — в .env (образец .env.example), он необязателен.
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      RVM_DEMO_LOGIN: ${RVM_DEMO_LOGIN:-1}
+      RVM_SEED: ${RVM_SEED:-1}
+    volumes:
+      - rvm-var:/app/var
+    restart: unless-stopped
+
+  # Закрытый контур: модель локально, данные не уходят наружу.
+  # docker compose --profile local up; в .env: LLM_BASE_URL=http://ollama:11434/v1,
+  # LLM_API_KEY=ollama, LLM_MODEL=<модель>; модель скачать:
+  # docker compose exec ollama ollama pull <модель>
+  ollama:
+    image: ollama/ollama
+    profiles: [local]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  rvm-var:
+  ollama:

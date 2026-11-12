@@ -9,3 +9,4 @@ __pycache__/
 *.sqlite
 *.db
 /var/
+!data/demo/cache.sqlite
