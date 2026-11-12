@@ -10,4 +10,4 @@ __pycache__/
 *.db
 /var/
 !data/demo/cache.sqlite
-/data/case/
+/data/case
