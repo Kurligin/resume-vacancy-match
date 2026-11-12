@@ -1245,6 +1245,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "natasha" },
     { name = "openai" },
     { name = "pillow" },
@@ -1264,7 +1265,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "rapidfuzz" },
@@ -1275,6 +1275,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.162.5" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "natasha", specifier = ">=1.6.0" },
     { name = "openai", specifier = ">=3.49.0" },
     { name = "pillow", specifier = ">=13.0.0" },
@@ -1294,7 +1295,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=26.10.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
