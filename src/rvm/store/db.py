@@ -590,6 +590,30 @@ def list_vacancies(db: Path) -> list[dict[str, Any]]:
     return [{**dict(r), "id": str(r["id"]), "is_open": bool(r["is_open"])} for r in rows]
 
 
+def vacancy_candidates(db: Path, vacancy_id: str) -> list[dict[str, Any]]:
+    """Оценки по вакансии для последней версии резюме каждого кандидата, лучшие сверху;
+    blockers — тексты невыполненных обязательных требований."""
+    with _tx(db, write=False) as conn:
+        if not conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vacancy_id,)).fetchone():
+            raise KeyError(f"нет вакансии {vacancy_id}")
+        rows = conn.execute(
+            "SELECT c.id, c.status, e.resume_id, e.score, e.low, e.high, e.verdict, e.result"
+            " FROM candidates c JOIN evaluations e"
+            " ON e.resume_id=(SELECT max(id) FROM resumes WHERE candidate_id=c.id)"
+            " WHERE e.vacancy_id=? ORDER BY e.score DESC, c.id",
+            (vacancy_id,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        res = VacancyResult.model_validate_json(r["result"])
+        text = {q.id: q.text for q in res.requirements}
+        out.append(
+            {k: r[k] for k in ("id", "status", "resume_id", "score", "low", "high", "verdict")}
+            | {"blockers": [text.get(b, b) for b in res.score.blockers]}
+        )
+    return out
+
+
 def open_vacancies(db: Path) -> dict[str, Document]:
     """Открытые вакансии в виде, который принимает analyze()."""
     with _tx(db, write=False) as conn:
