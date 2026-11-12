@@ -283,7 +283,9 @@ def test_rough_checks_linear_on_long_tokens() -> None:
     assert time.perf_counter() - start < 0.5
 
 
-@pytest.mark.parametrize("line", ["Связь: @ivan_dev", "@IvanDev", "пишите @ivan", "@ivan."])
+@pytest.mark.parametrize(
+    "line", ["Связь: @ivan_dev", "@IvanDev", "пишите @ivan", "@ivan.", "@pythonista", "@python"]
+)
 def test_any_nick_masked_by_default(line: str) -> None:
     m = mask(doc_of(line))
     assert "@" not in m.doc.lines[0].text and "[ник]" in m.doc.lines[0].text
@@ -295,7 +297,8 @@ def test_any_nick_masked_by_default(line: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "line", ["@Override, @Component", "@media", "@font-face, @keyframes", "@NgModule", "@python"]
+    "line",
+    ["@Override, @Component", "@media", "@font-face, @keyframes", "@NgModule", "@angular/core"],
 )
 def test_whitelisted_at_tokens_kept(line: str) -> None:
     m = mask(doc_of(line))
@@ -303,9 +306,16 @@ def test_whitelisted_at_tokens_kept(line: str) -> None:
     assert_clean(m)
 
 
-@pytest.mark.parametrize("planted", ["@override", "user@localhost", "ivan @ "])
+@pytest.mark.parametrize("planted", ["@override", "user@localhost", "@pythonista", "@Python"])
 def test_assert_clean_any_leftover_at(planted: str) -> None:
     m = mask(doc_of("Опыт 5 лет"))
     m.doc.lines[0].text += f" {planted}"
     with pytest.raises(PrivacyError):
         assert_clean(m)
+
+
+@pytest.mark.parametrize("line", ["Сбер @ 2020", "Сбер @", "@ ", "a @ b @"])
+def test_lone_at_not_leak(line: str) -> None:
+    m = mask(doc_of(line))
+    assert m.doc.lines[0].text == line
+    assert_clean(m)

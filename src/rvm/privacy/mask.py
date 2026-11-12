@@ -32,7 +32,9 @@ _EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:[\w-]+(?:\.[\w-]+)+|{_MAILBOX}\b)
 _PHONE = re.compile(
     r"(?<![\w+])(?:(?:\+\d{1,3}|[78])[\s-]*\(?\d{3}\)?|\(\d{3}\))(?:[\s-]*\d){7}(?!\d)"
 )
-# любой «@токен» — ник, кроме белого списка: аннотации Java/Angular и CSS-правила
+# любой «@токен» — ник, кроме статического белого списка (с учётом регистра): аннотации
+# Java/Angular, CSS-правила, npm-область @angular. Справочник навыков не используем: одна
+# опечатка в нём или подстановка открыла бы ник наружу, и маска с проверкой совпадают
 _NICK = re.compile(r"(?<![\w.+-])@[\w.-]*\w")
 _AT_ALLOWED = frozenset(
     [
@@ -63,6 +65,7 @@ _AT_ALLOWED = frozenset(
         "keyframes",
         "font-face",
         "supports",
+        "angular",
     ]
 )
 # закрытые маски вырезаем перед поиском оставшихся «@»
@@ -97,6 +100,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # Грубые проверки assert_clean, независимые от маски: цепочка цифр с разделителями, почта, домены
 _DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
 _ROUGH_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:\w[\w-]*\.\w{{2,}}|{_MAILBOX}\b)")
+_AT_BEFORE_TOKEN = re.compile(r"@(?!\s|$)")
 _DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:ru|com|рф|me|io|org|net|su)\b")
 _MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
@@ -181,9 +185,8 @@ def _is_skill(text: str, m: re.Match[str]) -> bool:
 
 
 def _at_allowed(token: str) -> bool:
-    """«@токен» из белого списка или навык из справочника (@python) — не ник."""
-    name = token[1:]
-    return name in _AT_ALLOWED or canonical(name) is not None
+    """«@токен» из статического белого списка — не ник."""
+    return token[1:] in _AT_ALLOWED
 
 
 def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, str]]]:
@@ -270,9 +273,10 @@ def _rough_hits(text: str) -> list[str]:
         if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
             hits.append("цифры")
     hits += ["почта"] * len(_ROUGH_EMAIL.findall(text))
-    # любой «@», кроме белого списка и масок, — утечка (без опоры на детектор ника)
+    # любой «@» перед токеном, кроме белого списка и масок, — утечка (без опоры на детектор
+    # ника); одиночный «@» перед пробелом или в конце («Сбер @ 2020») — не утечка
     rest = _NICK.sub(lambda m: "" if _at_allowed(m.group()) else m.group(), _MASK.sub("", text))
-    hits += ["@"] * rest.count("@")
+    hits += ["@"] * len(_AT_BEFORE_TOKEN.findall(rest))
     hits += ["домен" for m in _DOMAIN.finditer(text) if not _is_skill(text, m)]
     return hits
 
