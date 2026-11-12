@@ -24,11 +24,21 @@ from rvm.store.db import (
     save_report,
     set_status,
 )
+from rvm.store.flow import (
+    UNDECIDED,
+    full_name,
+    log,
+    set_statuses,
+    spot_answers,
+    stats,
+    summaries,
+)
 
 __all__ = [
     "BY_RECRUITER",
     "CLARIFIED",
     "FROM_CANDIDATE",
+    "UNDECIDED",
     "Added",
     "CandidateStatus",
     "CleanupError",
@@ -40,12 +50,18 @@ __all__ = [
     "close_vacancy",
     "delete_candidate",
     "dismiss_duplicate",
+    "full_name",
     "init",
     "list_candidates",
     "list_vacancies",
     "load_report",
+    "log",
     "merge_candidates",
     "open_vacancies",
     "save_report",
     "set_status",
+    "set_statuses",
+    "spot_answers",
+    "stats",
+    "summaries",
 ]

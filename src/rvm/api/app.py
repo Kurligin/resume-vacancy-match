@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import (
-    Depends,
     FastAPI,
     File,
     Form,
@@ -36,7 +35,8 @@ from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rvm import store
-from rvm.api import auth
+from rvm.api import auth, hh, package, triage
+from rvm.api.auth import Anyone, Manager, Recruiter
 from rvm.ingest import limits, load_bytes, load_text
 from rvm.ingest.readers import check_zip
 from rvm.llm import LLMClient
@@ -74,7 +74,20 @@ class BatchCreated(BaseModel):
     files: int
 
 
-class CandidateItem(BaseModel):
+class Flow(BaseModel):
+    """Поля потока откликов: должность, лучшая вакансия последней версии, ожидание ответа."""
+
+    position: str | None = None  # из фактов резюме
+    best_vacancy: str | None = None
+    best_title: str | None = None
+    best_vacancy_score: float | None = None
+    name: str | None = None  # ФИО — только по pii=true и только рекрутеру
+    waiting: bool = True  # ответ кандидату ещё не отправлен
+    waiting_days: int | None = None
+    replied_at: str | None = None
+
+
+class CandidateItem(Flow):
     id: int
     status: CandidateStatus
     created_at: str
@@ -113,7 +126,7 @@ class Event(BaseModel):
     details: dict[str, Any]
 
 
-class Card(BaseModel):
+class Card(Flow):
     id: int
     status: CandidateStatus
     created_at: str
@@ -207,26 +220,6 @@ def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
         raise
     except Exception as e:
         raise ValueError(f"{name}: архив не прочитан: {e}") from e
-
-
-def _need(role: auth.Role) -> Any:
-    def dep(request: Request) -> auth.User:
-        user: auth.User = request.state.user  # без сессии сюда не доходит: 401 в middleware
-        if user.role != role:
-            raise HTTPException(403, f"доступно роли «{auth.ROLE_NAMES[role]}»")
-        return user
-
-    return Depends(dep)
-
-
-def _current(request: Request) -> auth.User:
-    user: auth.User = request.state.user
-    return user
-
-
-Anyone = Annotated[auth.User, Depends(_current)]
-Recruiter = Annotated[auth.User, _need("recruiter")]
-Manager = Annotated[auth.User, _need("manager")]
 
 
 def _with_vacancy(old: Report, new: Report) -> Report:
@@ -354,6 +347,26 @@ def create_app(
             state["state"] = "done"
         except Exception as e:  # noqa: BLE001 — сверка резерва фоновая, ошибку показываем
             state.update(state="error", error=str(e) or type(e).__name__)
+
+    def flow(user: auth.User, pii: bool, ids: list[int] | None = None) -> dict[int, Flow]:
+        out = {}
+        for cid, c in store.summaries(db, ids).items():
+            created = date.fromisoformat(c["created_at"][:10])
+            out[cid] = Flow(
+                **c,
+                name=store.full_name(db, cid) if pii and user.role == "recruiter" else None,
+                waiting_days=(now() - created).days if c["waiting"] else None,
+            )
+        return out
+
+    def batch_ids(batch_id: str) -> list[int] | None:
+        with lock:
+            files = batches.get(batch_id)
+            return None if files is None else [f.candidate_id for f in files if f.candidate_id]
+
+    def start_reserve(vid: str) -> None:
+        reserve[vid] = {"state": "running", "checked": 0, "matches": []}
+        pool.submit(check_reserve, vid)
 
     def not_found(e: KeyError) -> HTTPException:
         return HTTPException(404, str(e.args[0]) if e.args else "не найдено")
@@ -484,8 +497,7 @@ def create_app(
         if not doc.lines:
             raise HTTPException(422, "; ".join(doc.warnings) or "вакансия не прочитана")
         vid = store.add_vacancy(db, doc, source=source)
-        reserve[vid] = {"state": "running", "checked": 0, "matches": []}
-        pool.submit(check_reserve, vid)
+        start_reserve(vid)
         return vacancy_item(next(v for v in store.list_vacancies(db) if v["id"] == vid))
 
     @app.post("/api/vacancies/{vacancy_id}/close", summary="Закрыть вакансию")
@@ -504,14 +516,18 @@ def create_app(
         status: CandidateStatus | None = None,
         q: Annotated[str | None, Query(description="поиск по должности и навыкам")] = None,
         sort: Literal["score", "date"] = "score",
+        pii: Annotated[bool, Query(description="ФИО из исходного текста")] = False,
     ) -> list[CandidateItem]:
         if user.role == "manager":
             status = CandidateStatus.CUST
-        return [CandidateItem(**c) for c in store.list_candidates(db, status, q, sort)]
+        rows = store.list_candidates(db, status, q, sort)
+        extra = flow(user, pii, [c["id"] for c in rows])
+        return [CandidateItem(**c, **extra[c["id"]].model_dump()) for c in rows]
 
     @app.get("/api/candidates/{candidate_id}", summary="Карточка: версии, оценки, история")
-    def candidate(candidate_id: int, user: Anyone) -> Card:
-        return Card(**visible_card(user, candidate_id))
+    def candidate(candidate_id: int, user: Anyone, pii: bool = False) -> Card:
+        c = visible_card(user, candidate_id)
+        return Card(**c, **flow(user, pii, [candidate_id])[candidate_id].model_dump())
 
     @app.patch("/api/candidates/{candidate_id}", summary="Сменить статус кандидата")
     def change_status(candidate_id: int, body: StatusChange, user: Recruiter) -> dict[str, bool]:
@@ -639,5 +655,8 @@ def create_app(
     def health() -> Health:
         return Health(mode=llm.mode, model=llm.model, version=version("rvm"))
 
+    app.include_router(triage.router(db, batch_ids))
+    app.include_router(package.router(db))
+    app.include_router(hh.router(db, start_reserve))
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
