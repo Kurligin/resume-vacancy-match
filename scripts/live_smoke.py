@@ -41,12 +41,8 @@ def main() -> int:
 
     from rvm.ingest import load_path
     from rvm.llm.client import LLMClient
-    from rvm.pipeline.extract_resume import extract_resume_facts
-    from rvm.pipeline.extract_vacancy import extract_requirements
-    from rvm.pipeline.match import match
+    from rvm.pipeline.analyze import analyze
     from rvm.pipeline.verify import verified_share
-    from rvm.scoring.rank import rank_vacancies
-    from rvm.scoring.score import score_pair
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     llm = LLMClient()
@@ -58,31 +54,30 @@ def main() -> int:
     )
 
     t0 = time.time()
-    vacancies = {}
-    for f in vac_files:
-        doc = load_path(f)
-        reqs = extract_requirements(doc, llm)
-        vacancies[f.stem] = reqs
-        print(f"  {f.stem}: требований {len(reqs)}")
-
+    vacancies = {f.stem: load_path(f) for f in vac_files}
     shares = []
-    for f in res_files:
-        doc = load_path(f)
-        facts = extract_resume_facts(doc, llm)
-        scores = {}
-        for name, reqs in vacancies.items():
-            rows = match(reqs, doc, facts, llm, today)
-            shares.append(verified_share(rows))
-            scores[name] = score_pair(reqs, rows)
-        ranking = rank_vacancies(scores)
+    for i, f in enumerate(res_files):
+        report = analyze(load_path(f), vacancies, llm, today, source_name=f.name)
+        if i == 0:  # требования одни для всех резюме: печатаем один раз
+            for v in sorted(report.vacancies, key=lambda v: v.id):
+                print(f"  {v.id}: требований {len(v.requirements)}")
         print(f"\n{f.stem}")
-        for p in ranking.places:
-            s = p.score
+        if report.error:
+            print(f"  {report.error}")
+            continue
+        for v in report.vacancies:
+            shares.append(verified_share(v.rows))
+            s = v.score
             bl = f" · блокеры {len(s.blockers)}" if s.blockers else ""
+            mark = " · отклик" if v.id == report.applied else ""
             print(
-                f"  {p.place}. {p.id:<12} {s.score:5.1f} [{s.low:.0f}–{s.high:.0f}] {s.verdict}{bl}"
+                f"  {v.place}. {v.id:<12} {s.score:5.1f} [{s.low:.0f}–{s.high:.0f}] {v.verdict}"
+                f"{bl}{mark}"
             )
-        if ranking.none_fit:
+        if report.redirect:
+            r = report.redirect
+            print(f"  переадресация: {r.from_vacancy} → {r.to_vacancy} (+{r.gap:.0f})")
+        if report.none_fit:
             print("  ни одна вакансия не подходит")
 
     share = sum(shares) / len(shares) if shares else 0.0
