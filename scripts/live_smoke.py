@@ -12,8 +12,8 @@ import time
 from datetime import date
 from pathlib import Path
 
-DEFAULT_ENV = "~/Downloads/hackathons-heavy/resume-vacancy-match/.env"
-DEFAULT_DATA = "~/Downloads/hackathons-heavy/resume-vacancy-match/data/case"
+DEFAULT_ENV = ".env"
+DEFAULT_DATA = "data/case"
 DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"  # тот же класс, что Qwen3.6 35B в Yandex AI Studio
 
 

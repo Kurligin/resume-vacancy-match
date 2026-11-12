@@ -29,9 +29,13 @@ class SwitchFake(RoutingFake):
     """full=True — сопоставление отвечает «выполнено» по всем требованиям."""
 
     full = False
+    hook: Any = None  # вызывается один раз при первом ответе с full=True
 
     def _create(self, **kwargs: Any) -> Any:
         reply = super()._create(**kwargs)
+        if self.full and self.hook:
+            hook, self.hook = self.hook, None
+            hook()
         if self.full:
             msg = reply.choices[0].message
             msg.content = msg.content.replace(
@@ -405,3 +409,134 @@ def test_starts_in_demo_without_key(
         r = c.post("/api/login", json={"role": "recruiter"}, headers=HEADERS)
         assert r.status_code == 403 and "демо-вход отключён" in r.text
     assert "LLM_API_KEY" in caplog.text and "RVM_SECRET" in caplog.text
+
+
+def test_reserve_sweep_keeps_concurrent_edit(
+    tmp_path: Path, api: TestClient, fake: SwitchFake
+) -> None:
+    from rvm import store
+    from rvm.models import Status
+
+    v1 = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    (f,) = wait_batch(api, upload(api, [("a.txt", resume(1))]))
+    cid = f["candidate_id"]
+    api.patch(f"/api/candidates/{cid}", json={"status": "reserve"})
+    rid = api.get(f"/api/candidates/{cid}").json()["versions"][0]["id"]
+    req = api.get(f"/api/evaluations/{rid}/{v1}").json()["result"]["requirements"][0]["id"]
+    edited: list[Any] = []
+
+    def edit() -> None:  # рекрутер правит строку, пока идёт сверка резерва
+        edited.append(
+            store.answer(
+                tmp_path / "rvm.sqlite", rid, v1, req, Status.FULL, flag=store.BY_RECRUITER
+            )
+        )
+
+    fake.full, fake.hook = True, edit
+    v2 = add_vacancy(api, "Python-аналитик\nТребования: Python")
+    wait(api, "/api/vacancies", lambda b: b[-1]["reserve_state"] == "done")
+    assert edited
+    row = api.get(f"/api/evaluations/{rid}/{v1}").json()["result"]
+    assert row["score"] == edited[0].model_dump(mode="json")
+    assert row["rows"][0]["flags"] == ["изменено рекрутером"]
+    card = api.get(f"/api/candidates/{cid}").json()
+    assert sorted(e["place"] for e in card["evaluations"]) == [1, 2]
+    report = api.get("/api/evaluations", params={"candidate": cid}).json()
+    scores = [v["score"]["score"] for v in report["vacancies"]]
+    assert scores == sorted(scores, reverse=True)
+    evaluated = [e["vacancy_id"] for e in card["events"] if e["type"] == "evaluated"]
+    assert evaluated == [v1, v2]  # сверка пишет оценку только новой вакансии
+
+
+def test_batch_zip_not_limited_by_docx_cap() -> None:
+    from rvm.api.app import _unpack
+
+    chunk = os.urandom(6 * 2**20).hex().encode()  # 12 МБ текста, сжатие около 2 раз
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+        for i in range(10):
+            z.writestr(f"r{i}.txt", chunk)
+    parts = _unpack("pack.zip", buf.getvalue(), 200 * 2**20)
+    assert len(parts) == 10 and sum(len(d) for _, d in parts) == 120 * 2**20
+
+    bomb = io.BytesIO()
+    with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("r.txt", b"0" * 2**20)
+    with pytest.raises(ValueError, match="zip-бомб"):
+        _unpack("bomb.zip", bomb.getvalue(), 200 * 2**20)
+
+
+def demo_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    for k in ("LLM_API_KEY", "LLM_MODE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("RVM_CACHE", str(tmp_path / "cache.sqlite"))
+    monkeypatch.setenv("RVM_SECRET", "тестовый-секрет")
+    monkeypatch.setenv("RVM_DEMO_LOGIN", "1")
+    return create_app(db=tmp_path / "rvm.sqlite", today=date(2026, 11, 12))
+
+
+def test_demo_mode_analyzes_new_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from rvm.llm.client import DEMO_MODEL
+
+    with client(demo_app(tmp_path, monkeypatch), "recruiter") as c:
+        add_vacancy(c, "Python-разработчик\nТребования:\nОпыт разработки на Python\nЗнание SQL")
+        text = "Кандидат\nОпыт разработки на Python 5 лет\nSQL, PostgreSQL\n".encode()
+        (f,) = wait_batch(c, upload(c, [("r.txt", text)]))
+        assert f["state"] == "done" and DEMO_MODEL in f["message"]
+        report = c.get("/api/evaluations", params={"candidate": f["candidate_id"]}).json()
+    assert report["model"] == DEMO_MODEL
+    assert report["vacancies"] and report["vacancies"][0]["rows"]
+
+
+def test_key_without_model_fails_at_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_API_KEY", "x")
+    monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.delenv("LLM_MODE", raising=False)
+    with pytest.raises(RuntimeError, match="LLM_MODEL"):
+        create_app(db=tmp_path / "rvm.sqlite")
+
+
+def test_delete_when_db_busy(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from rvm.store import CleanupError
+
+    def busy(_: Path) -> None:
+        raise CleanupError("журнал не очищен: база занята")
+
+    monkeypatch.setattr("rvm.store.db.cleanup", busy)
+    add_vacancy(api, "Python-разработчик\nТребования: Python")
+    bid = upload(api, [("Иванов.txt", resume(1)), ("b.txt", resume(2))])
+    a, _ = wait_batch(api, bid)
+    r = api.delete(f"/api/candidates/{a['candidate_id']}")
+    assert r.status_code == 200 and "занята" in r.json()["warning"]
+    files = api.get(f"/api/uploads/{bid}").json()["files"]
+    assert [f["name"] for f in files] == ["b.txt"]
+    assert api.get(f"/api/candidates/{a['candidate_id']}").status_code == 404
+
+
+def test_same_file_twice_in_batch(api: TestClient) -> None:
+    add_vacancy(api, "Python-разработчик\nТребования: Python")
+    a, b = wait_batch(api, upload(api, [("a.txt", resume(4)), ("a2.txt", resume(4))]))
+    assert a["candidate_id"] == b["candidate_id"]
+    card = api.get(f"/api/candidates/{a['candidate_id']}").json()
+    assert [e["type"] for e in card["events"]].count("evaluated") == 1
+
+
+def test_manager_sees_no_recruiter_comments(app: FastAPI, api: TestClient) -> None:
+    vid = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    (f,) = wait_batch(api, upload(api, [("a.txt", resume(1))]))
+    cid = f["candidate_id"]
+    r = api.post(
+        "/api/triage/decide",
+        json={"candidate_ids": [cid], "decision": 1, "vacancy_id": vid, "comment": "секрет-р"},
+    )
+    assert r.status_code == 200, r.text
+    api.post("/api/triage/spot", json={"candidate_id": cid, "agree": True, "comment": "секрет-с"})
+    api.patch(f"/api/candidates/{cid}", json={"status": "cust"})
+    with client(app, "manager") as boss:
+        url = f"/api/candidates/{cid}/manager-decision"
+        assert boss.post(url, json={"decision": "invite", "comment": "моё"}).status_code == 200
+        api.patch(f"/api/candidates/{cid}", json={"status": "cust"})
+        events = boss.get(f"/api/candidates/{cid}").json()["events"]
+    assert events and {e["type"] for e in events} == {"status"}
+    assert "секрет" not in str(events)
+    assert any(e["details"].get("comment") == "моё" for e in events)

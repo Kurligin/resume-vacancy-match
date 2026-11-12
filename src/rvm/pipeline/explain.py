@@ -111,10 +111,15 @@ def _grounded(point: Point, rows: dict[str, str], facts_text: str, facts_nums: s
     if not point.refs or any(r not in rows for r in point.refs):
         return False
     allowed = " ".join(rows[r] for r in point.refs) + " " + facts_text
-    terms = set(hints(point.text)) | set(_LATIN.findall(point.text))
+    return supported(point.text, allowed, facts_nums)
+
+
+def supported(text: str, allowed: str, nums: set[float] | None = None) -> bool:
+    """Навыки и числа текста есть в allowed (или среди nums): модель ничего не выдумала."""
+    terms = set(hints(text)) | set(_LATIN.findall(text))
     if any(not mentioned(t, allowed) for t in terms):
         return False
-    return _numbers(point.text) <= _numbers(allowed) | facts_nums
+    return _numbers(text) <= _numbers(allowed) | (nums or set())
 
 
 def fallback(

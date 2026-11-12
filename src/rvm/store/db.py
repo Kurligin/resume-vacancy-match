@@ -448,14 +448,7 @@ def answer(
     несостыковка помечается «прояснено со слов кандидата» и уходит из рисков."""
     with _tx(db) as conn:
         cid = _candidate_of(conn, resume_id)
-        rows = conn.execute(
-            "SELECT result, model, prompt_versions FROM evaluations WHERE resume_id=?",
-            (resume_id,),
-        ).fetchall()
-        results = {}
-        for r in rows:
-            v = VacancyResult.model_validate_json(r["result"])
-            results[v.id] = (v, r)
+        results = _results(conn, resume_id)
         if vacancy_id not in results:
             raise KeyError(f"нет оценки резюме {resume_id} по вакансии {vacancy_id}")
         res = results[vacancy_id][0]
@@ -477,21 +470,7 @@ def answer(
         res.score = score_pair(res.requirements, res.rows)
         res.verdict = res.score.verdict
 
-        a = conn.execute("SELECT analysis FROM resumes WHERE id=?", (resume_id,)).fetchone()[0]
-        analysis = json.loads(a)
-        ranking = rank_vacancies(
-            {vid: v.score for vid, (v, _) in results.items()}, analysis.get("applied")
-        )
-        for p in ranking.places:
-            v, m = results[p.id]
-            v.place, v.why_not_first = p.place, p.why_not_first
-            _put_eval(conn, resume_id, v, m["model"], m["prompt_versions"])
-        analysis["redirect"] = ranking.redirect and ranking.redirect.model_dump(mode="json")
-        analysis["none_fit"] = ranking.none_fit
-        conn.execute(
-            "UPDATE resumes SET analysis=? WHERE id=?",
-            (json.dumps(analysis, ensure_ascii=False), resume_id),
-        )
+        _rerank(conn, resume_id, results)
         _event(
             conn,
             "answer" if flag == FROM_CANDIDATE else "edited",
@@ -504,6 +483,46 @@ def answer(
             after=res.score.score,
         )
         return res.score
+
+
+def _results(conn: sqlite3.Connection, resume_id: int) -> dict[str, tuple[VacancyResult, Any]]:
+    rows = conn.execute(
+        "SELECT result, model, prompt_versions FROM evaluations WHERE resume_id=?", (resume_id,)
+    ).fetchall()
+    return {(v := VacancyResult.model_validate_json(r["result"])).id: (v, r) for r in rows}
+
+
+def _rerank(
+    conn: sqlite3.Connection, resume_id: int, results: dict[str, tuple[VacancyResult, Any]]
+) -> None:
+    """Места всех оценок резюме, переадресация и «никуда не подходит» — по текущим баллам."""
+    a = conn.execute("SELECT analysis FROM resumes WHERE id=?", (resume_id,)).fetchone()[0]
+    analysis = json.loads(a)
+    ranking = rank_vacancies(
+        {vid: v.score for vid, (v, _) in results.items()}, analysis.get("applied")
+    )
+    for p in ranking.places:
+        v, m = results[p.id]
+        v.place, v.why_not_first = p.place, p.why_not_first
+        _put_eval(conn, resume_id, v, m["model"], m["prompt_versions"])
+    analysis["redirect"] = ranking.redirect and ranking.redirect.model_dump(mode="json")
+    analysis["none_fit"] = ranking.none_fit
+    conn.execute(
+        "UPDATE resumes SET analysis=? WHERE id=?",
+        (json.dumps(analysis, ensure_ascii=False), resume_id),
+    )
+
+
+def add_evaluation(db: Path, resume_id: int, report: Report) -> None:
+    """Оценки report по новым вакансиям — к уже сохранённым (правки рекрутера в них остаются),
+    места пересчитываются в той же транзакции."""
+    meta = {"model": report.model, "prompt_versions": json.dumps(report.prompt_versions)}
+    with _tx(db) as conn:
+        cid = _candidate_of(conn, resume_id)
+        results = _results(conn, resume_id) | {v.id: (v, meta) for v in report.vacancies}
+        _rerank(conn, resume_id, results)
+        for v in report.vacancies:
+            _event(conn, "evaluated", cid, v.id, who="система", score=v.score.score)
 
 
 def _clarify(

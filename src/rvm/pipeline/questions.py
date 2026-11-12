@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from rvm.legal import topic
 from rvm.llm import LLMClient
 from rvm.models import MatchRow, ReqKind, Requirement, Section, Status
-from rvm.pipeline.explain import MODEL_ERRORS, Check
+from rvm.pipeline.explain import MODEL_ERRORS, Check, supported
 from rvm.scoring import config
 
 PROMPT_VERSION = "questions.v1"
@@ -85,9 +85,13 @@ def questions(
         worded = {i.topic: i.question.strip() for i in answer.items if i.question.strip()}
     except MODEL_ERRORS:
         pass  # формулировки по шаблону
+    # формулировка с навыком или числом не из темы — выдумка, вместо неё шаблон
     items = [
-        Question(requirement_id=t.requirement_id, text=worded.get(t.key, t.template))
+        Question(
+            requirement_id=t.requirement_id, text=w if w and supported(w, t.about) else t.template
+        )
         for t in topics
+        for w in [worded.get(t.key)]
     ]
     kept = [q for q in items if topic(q.text) is None]
     return Questions(items=kept[:MAX_QUESTIONS], dropped=len(items) - len(kept))

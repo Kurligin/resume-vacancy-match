@@ -21,8 +21,8 @@ import yaml
 from eval_metrics import STATUSES, evaluate
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_ENV = "~/Downloads/hackathons-heavy/resume-vacancy-match/.env"
-DEFAULT_DATA = "~/Downloads/hackathons-heavy/resume-vacancy-match/data/case"
+DEFAULT_ENV = ".env"
+DEFAULT_DATA = "data/case"
 DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"
 STATUS_RU = {"full": "есть", "partial": "частично", "no": "нет", "unknown": "не указано"}
 

@@ -1,9 +1,10 @@
 """HTTP API сервиса: загрузки с очередью, вакансии со сверкой резерва, база кандидатов, оценки.
 
-Тяжёлая работа (чтение файлов, модель) идёт в пуле из двух потоков; состояние пачек и сверок
-резерва — в памяти процесса. Без сессии /api/* отвечает 401 (кроме health и входа),
-изменяющие запросы — только с заголовком X-Requested-With."""
+Тяжёлая работа (чтение файлов, модель) идёт в пуле из двух потоков, сверки резерва — по одной
+в отдельном потоке; состояние пачек и сверок резерва — в памяти процесса. Без сессии /api/*
+отвечает 401 (кроме health и входа), изменяющие запросы — только с заголовком X-Requested-With."""
 
+import hashlib
 import io
 import logging
 import os
@@ -38,12 +39,12 @@ from rvm import store
 from rvm.api import auth, hh, package, triage
 from rvm.api.auth import Anyone, Manager, Recruiter
 from rvm.ingest import limits, load_bytes, load_text
-from rvm.ingest.readers import check_zip
 from rvm.llm import LLMClient
+from rvm.llm.fake import DemoFake
 from rvm.models import Document, Status
 from rvm.pipeline.analyze import Report, ReportStatus, ResumeView, VacancyResult, analyze
 from rvm.privacy import mask
-from rvm.scoring import PairScore, Verdict, rank_vacancies
+from rvm.scoring import PairScore, Verdict
 from rvm.store import CandidateStatus
 
 MAX_BATCH = 300  # файлов в одной пачке
@@ -59,6 +60,7 @@ CSP = (
 log = logging.getLogger("rvm.api")
 STATIC = Path(__file__).parent / "static"
 _SKIP_IN_ZIP = ("__MACOSX", ".")  # служебные папки macOS и скрытые файлы
+_STATUS = {"from", "to", "package", "names"}  # поля журнала статусов, видимые руководителю
 
 FileState = Literal["queued", "reading", "done", "error"]
 
@@ -228,7 +230,9 @@ def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
         return [(name, data)]
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            check_zip(z)
+            # у пачки свой бюджет (budget), лимит одного docx к ней не относится
+            if sum(i.file_size for i in z.infolist()) > limits.MAX_ZIP_RATIO * max(len(data), 1):
+                raise ValueError("архив сжат подозрительно сильно (похоже на zip-бомбу)")
             infos = [
                 i
                 for i in z.infolist()
@@ -247,18 +251,6 @@ def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
         raise ValueError(f"{name}: архив не прочитан: {e}") from e
 
 
-def _with_vacancy(old: Report, new: Report) -> Report:
-    """Старые оценки (с правками рекрутера) + оценка по новой вакансии, места пересчитаны."""
-    results = {v.id: v for v in old.vacancies} | {v.id: v for v in new.vacancies}
-    ranking = rank_vacancies({vid: v.score for vid, v in results.items()}, old.applied)
-    for p in ranking.places:
-        results[p.id].place, results[p.id].why_not_first = p.place, p.why_not_first
-    ordered = sorted(results.values(), key=lambda v: (v.place is None, v.place))
-    return old.model_copy(
-        update={"vacancies": ordered, "redirect": ranking.redirect, "none_fit": ranking.none_fit}
-    )
-
-
 def create_app(
     db: Path | None = None, llm: LLMClient | None = None, today: date | None = None
 ) -> FastAPI:
@@ -270,8 +262,13 @@ def create_app(
     store.init(db)
     if llm is None:
         if env.get("LLM_MODE", "live") == "live" and not env.get("LLM_API_KEY"):
-            log.warning("LLM_API_KEY не задан — режим demo: ответы модели только из кэша")
-            llm = LLMClient(mode="demo")
+            log.warning(
+                "LLM_API_KEY не задан — режим demo: ответы из кэша, новые файлы разбирает "
+                "демо-модель без ИИ"
+            )
+            llm = LLMClient(DemoFake(), mode="demo")
+        elif not env.get("LLM_MODEL"):
+            raise RuntimeError("LLM_API_KEY задан, а LLM_MODEL пуст: укажите id модели в .env")
         else:
             llm = LLMClient()
     if not env.get("RVM_SECRET"):
@@ -288,7 +285,9 @@ def create_app(
         date.fromisoformat(os.environ["RVM_TODAY"]) if os.environ.get("RVM_TODAY") else None
     )
     pool = ThreadPoolExecutor(2, thread_name_prefix="rvm")
+    sweeps = ThreadPoolExecutor(1, thread_name_prefix="rvm-reserve")  # сверки по одной
     lock = threading.Lock()
+    same_file: dict[str, threading.Lock] = {}  # sha256 → блокировка: один файл — один разбор
     batches: dict[str, list[UploadFileState]] = {}
     reserve: dict[str, dict[str, Any]] = {}
 
@@ -299,6 +298,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
         pool.shutdown(wait=True, cancel_futures=True)
+        sweeps.shutdown(wait=True, cancel_futures=True)
 
     app = FastAPI(
         lifespan=lifespan,
@@ -332,6 +332,13 @@ def create_app(
                 setattr(f, k, v)
 
     def process(f: UploadFileState, data: bytes, applied: str | None) -> None:
+        with lock:
+            # shortcut: блокировки не удаляются — по строке на уникальный файл за жизнь процесса
+            mine = same_file.setdefault(hashlib.sha256(data).hexdigest(), threading.Lock())
+        with mine:
+            read(f, data, applied)
+
+    def read(f: UploadFileState, data: bytes, applied: str | None) -> None:
         set_file(f, state="reading")
         try:
             doc = load_bytes(f.name, data)
@@ -370,7 +377,7 @@ def create_app(
                 doc = Document(name=r.name, lines=r.original, status=r.status)
                 new = analyze(doc, vac, llm, now(), applied=old.applied, source_name=r.name)
                 if new.status == ReportStatus.OK and new.vacancies:
-                    store.save_report(db, rid, _with_vacancy(old, new))
+                    store.add_evaluation(db, rid, new)
                     if new.vacancies[0].verdict in (Verdict.FIT, Verdict.PARTIAL):
                         state["matches"].append(c["id"])
                 state["checked"] += 1
@@ -397,7 +404,7 @@ def create_app(
 
     def start_reserve(vid: str) -> None:
         reserve[vid] = {"state": "running", "checked": 0, "matches": []}
-        pool.submit(check_reserve, vid)
+        sweeps.submit(check_reserve, vid)
 
     def not_found(e: KeyError) -> HTTPException:
         return HTTPException(404, str(e.args[0]) if e.args else "не найдено")
@@ -413,7 +420,13 @@ def create_app(
                 raise HTTPException(404, f"нет кандидата {candidate_id}")
             if not names_sent(c):  # в имени файла часто ФИО
                 c["versions"] = [{**v, "name": ""} for v in c["versions"]]
+            c["events"] = [for_manager(user, e) for e in c["events"] if e["type"] == "status"]
         return c
+
+    def for_manager(user: auth.User, e: dict[str, Any]) -> dict[str, Any]:
+        """Руководителю — смена статуса и пакет; комментарий и решение — только его собственные."""
+        mine = e["who"] == user.who
+        return {**e, "details": {k: v for k, v in e["details"].items() if mine or k in _STATUS}}
 
     def shown(user: auth.User, c: dict[str, Any], resume: ResumeView) -> ResumeView:
         """Руководителю — только обезличенные строки; имя файла — из карточки (см. visible_card)."""
@@ -600,12 +613,22 @@ def create_app(
         "/api/candidates/{candidate_id}",
         status_code=204,
         summary="Удалить кандидата со всеми данными",
+        description="204 — удалено. 200 с warning — удалено, но журнал базы не обрезан (база "
+        "занята): стёртое уйдёт из файла при следующей очистке.",
     )
     def delete(candidate_id: int, user: Recruiter) -> Response:
+        warning = ""
         try:
             store.delete_candidate(db, candidate_id, who=user.who)
         except KeyError as e:
             raise not_found(e) from e
+        except store.CleanupError as e:
+            warning = str(e)
+        with lock:  # в пачках — имена файлов (часто ФИО): убираем строки удалённого
+            for files in batches.values():
+                files[:] = [f for f in files if f.candidate_id != candidate_id]
+        if warning:
+            return JSONResponse({"ok": True, "warning": warning})
         return Response(status_code=204)
 
     @app.post(

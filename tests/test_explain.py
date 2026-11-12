@@ -222,3 +222,17 @@ def test_letters_drop_unlawful_reasons() -> None:
     out = {lt.kind: lt for lt in letters("Frontend", reqs, rows, score_pair(reqs, rows), None)}
     assert "Возраст" not in out[LetterKind.REJECT].text
     assert "Vue" in out[LetterKind.REJECT].text
+
+
+def test_questions_drop_invented_skill(tmp_path: Path) -> None:
+    reply = {
+        "items": [
+            {"topic": "Q1", "question": "Расскажите про опыт с Kubernetes и Go?"},
+            {"topic": "Q2", "question": "Сколько у вас опыта коммерческой разработки?"},
+            {"topic": "Q3", "question": "Как давно вы работаете с Nuxt — больше 7 лет?"},
+        ]
+    }
+    qs = questions(REQS, ROWS, CHECKS, llm_of(tmp_path, {"_Questions": reply}))
+    texts = [q.text for q in qs.items]
+    assert not any("Kubernetes" in t or "7 лет" in t for t in texts)
+    assert "Сколько у вас опыта коммерческой разработки?" in texts
