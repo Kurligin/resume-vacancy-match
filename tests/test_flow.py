@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import test_api
 from docx import Document as Docx
@@ -318,3 +319,13 @@ def test_hh(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     again = api.post("/api/vacancies/hh/import", json={"ids": ["101"]}).json()
     assert again["skipped"] == ["101"] and again["added"] == []
     assert api.post("/api/vacancies/hh/import", json={"ids": ["../x"]}).status_code == 422
+
+
+def test_hh_forbidden(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fetch(url: str, params: dict[str, Any] | None = None) -> Any:
+        req = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("403", request=req, response=httpx.Response(403, request=req))
+
+    monkeypatch.setattr(hh, "fetch_json", fetch)
+    r = api.get("/api/vacancies/hh")
+    assert r.status_code == 502 and "загрузка с hh не настроена на сервере" in r.json()["detail"]

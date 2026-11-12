@@ -97,6 +97,13 @@ def router(db: Path, on_added: Callable[[str], None]) -> APIRouter:
     def hh_list(_: Recruiter) -> list[HHVacancy]:
         try:
             items = listing()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 403:
+                raise HTTPException(502, f"hh.ru недоступен: {e}") from e
+            # hh отвечает 403 без зарегистрированного HH-User-Agent
+            raise HTTPException(
+                502, "загрузка с hh не настроена на сервере: hh.ru отказал (RVM_HH_USER_AGENT)"
+            ) from e
         except httpx.HTTPError as e:
             raise HTTPException(502, f"hh.ru недоступен: {e}") from e
         done = imported()
