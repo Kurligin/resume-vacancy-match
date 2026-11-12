@@ -35,7 +35,7 @@ _PHONE = re.compile(
 _NICK = re.compile(r"(?<![\w.])@[A-Za-z]\w{3,}")
 # «@ник» — контакт только рядом с мессенджером или словом «контакты»: иначе это @Override, @media
 _MESSENGER = re.compile(
-    r"(?i)telegram|телеграм|телега|instagram|инстаграм|whatsapp|ватсап|вконтакт|контакт|\b(?:tg|тг|вк|vk)\b"
+    r"(?i)telegram|телеграм|телега|instagram|инстаграм|whatsapp|ватсап|контакт|\b(?:tg|тг|вк|vk)\b"
 )
 _BIRTH = re.compile(
     r"(?i)(?:дата\s+рождения|родил(?:ся|ась))\s*:?\s*(?:в\s+)?"
