@@ -334,3 +334,25 @@ def test_case_file_twice(db: Path) -> None:
     a = store.add_resume(db, path.read_bytes(), d, mask(d, path.name))
     b = store.add_resume(db, path.read_bytes(), d, mask(d, path.name))
     assert a.resume_id == b.resume_id and len(store.card(db, a.candidate_id)["versions"]) == 1
+
+
+def test_recruiter_edit_flag_replaces_candidate_flag(db: Path) -> None:
+    d = doc("Python")
+    a = store.add_resume(db, b"a", d, masked(d, ["h"]))
+    store.save_report(db, a.resume_id, report(d.name, {"v1": {"r1": Status.UNKNOWN}}))
+    store.answer(db, a.resume_id, "v1", "r1", Status.FULL)
+    store.answer(db, a.resume_id, "v1", "r1", Status.PARTIAL, flag=store.BY_RECRUITER, who="Анна")
+    row = store.load_report(db, a.resume_id).vacancies[0].rows[0]
+    assert row.status == Status.PARTIAL and row.flags == [store.BY_RECRUITER]
+    ev = store.card(db, a.candidate_id)["events"][-1]
+    assert ev["type"] == "edited" and ev["who"] == "Анна"
+
+
+def test_set_status_with_comment(db: Path) -> None:
+    d = doc("Python")
+    a = store.add_resume(db, b"a", d, masked(d, ["h"]))
+    store.set_status(
+        db, a.candidate_id, store.CandidateStatus.CUST_REJECTED, who="Олег", comment="нет"
+    )
+    ev = store.card(db, a.candidate_id)["events"][-1]
+    assert ev["details"] == {"from": "new", "to": "cust_rejected", "comment": "нет"}

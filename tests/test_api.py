@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from test_analyze import RoutingFake
 
@@ -45,14 +46,29 @@ def fake() -> SwitchFake:
     return SwitchFake()
 
 
+HEADERS = {"X-Requested-With": "test"}
+
+
 @pytest.fixture
-def api(tmp_path: Path, fake: SwitchFake) -> Any:
+def app(tmp_path: Path, fake: SwitchFake, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    monkeypatch.setenv("RVM_SECRET", "тестовый-секрет")
     llm = LLMClient(
         fake, base_url=EXTERNAL, model="fake", mode="live", cache_path=tmp_path / "c.db"
     )
-    app = create_app(db=tmp_path / "rvm.sqlite", llm=llm, today=date(2026, 11, 12))
-    with TestClient(app) as client:
-        yield client
+    return create_app(db=tmp_path / "rvm.sqlite", llm=llm, today=date(2026, 11, 12))
+
+
+def client(app: FastAPI, role: str | None = None) -> TestClient:
+    c = TestClient(app, base_url="http://localhost", headers=HEADERS)
+    if role:
+        assert c.post("/api/login", json={"role": role}).status_code == 200
+    return c
+
+
+@pytest.fixture
+def api(app: FastAPI) -> Any:
+    with client(app, "recruiter") as c:
+        yield c
 
 
 def resume(i: int) -> bytes:
@@ -201,3 +217,138 @@ def test_case_files_card(api: TestClient) -> None:
     assert [f["state"] for f in done] == ["done"] * len(res)
     card = api.get(f"/api/candidates/{done[0]['candidate_id']}").json()
     assert len({e["vacancy_id"] for e in card["evaluations"]}) == 3
+
+
+def test_login_required(app: FastAPI) -> None:
+    with client(app) as anon:
+        assert anon.get("/api/health").status_code == 200
+        assert anon.get("/api/candidates").status_code == 401
+        assert anon.get("/api/me").status_code == 401
+        bad = {"login": "anna", "password": "не тот"}
+        assert anon.post("/api/login", json=bad).status_code == 401
+        ok = {"login": "anna", "password": "anna-demo"}
+        assert anon.post("/api/login", json=ok).status_code == 200
+        assert anon.get("/api/me").json() == {
+            "login": "anna",
+            "name": "Анна Смирнова",
+            "role": "recruiter",
+        }
+        assert anon.get("/api/candidates").status_code == 200
+        forged = anon.cookies["rvm_session"].replace("anna.", "oleg.")
+        anon.cookies.clear()
+        anon.cookies.set("rvm_session", forged)
+        assert anon.get("/api/candidates").status_code == 401  # подпись не сходится
+        anon.post("/api/login", json={"role": "recruiter"})
+        assert anon.post("/api/logout").status_code == 200
+        assert anon.get("/api/candidates").status_code == 401
+
+
+def test_csrf_header_and_host(app: FastAPI, api: TestClient) -> None:
+    r = api.post("/api/vacancies", data={"text": "Python"}, headers={"X-Requested-With": ""})
+    assert r.status_code == 403
+    with TestClient(app, base_url="http://evil.example") as other:
+        assert other.get("/api/health").status_code == 400
+
+
+def test_manager_sees_only_cust_and_decides(app: FastAPI, api: TestClient) -> None:
+    vid = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    a, b = (
+        f["candidate_id"]
+        for f in wait_batch(api, upload(api, [("a.txt", resume(1))]))
+        + wait_batch(api, upload(api, [("b.txt", resume(2))]))
+    )
+    api.patch(f"/api/candidates/{a}", json={"status": "cust"})
+    rid = api.get(f"/api/candidates/{a}").json()["versions"][0]["id"]
+    rid_b = api.get(f"/api/candidates/{b}").json()["versions"][0]["id"]
+
+    with client(app, "manager") as boss:
+        assert [c["id"] for c in boss.get("/api/candidates").json()] == [a]
+        assert boss.get(f"/api/candidates/{b}").status_code == 404
+        assert boss.get(f"/api/evaluations/{rid}/{vid}").status_code == 200
+        assert boss.get(f"/api/evaluations/{rid_b}/{vid}").status_code == 404
+        assert boss.get("/api/evaluations", params={"candidate": b}).status_code == 404
+        assert boss.patch(f"/api/candidates/{a}", json={"status": "new"}).status_code == 403
+        assert boss.post("/api/vacancies", data={"text": "x"}).status_code == 403
+        url = f"/api/candidates/{a}/manager-decision"
+        r = boss.post(url, json={"decision": "invite", "comment": "сильный"})
+        assert r.status_code == 200, r.text
+        assert boss.post(url, json={"decision": "reject"}).status_code == 404  # уже не у заказчика
+
+    card = api.get(f"/api/candidates/{a}").json()
+    assert card["status"] == "invited"
+    ev = card["events"][-1]
+    assert ev["who"] == "Олег Волков (руководитель)" and ev["details"]["comment"] == "сильный"
+    assert (
+        api.post(f"/api/candidates/{b}/manager-decision", json={"decision": "invite"}).status_code
+        == 403
+    )
+
+
+def test_recruiter_edit_and_who(api: TestClient) -> None:
+    vid = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    (f,) = wait_batch(api, upload(api, [("r.txt", resume(3))]))
+    rid = api.get(f"/api/candidates/{f['candidate_id']}").json()["versions"][0]["id"]
+    req = api.get(f"/api/evaluations/{rid}/{vid}").json()["result"]["requirements"][0]["id"]
+    url = f"/api/evaluations/{rid}/{vid}/rows/{req}"
+    assert api.patch(url, json={"status": "full", "by": "recruiter"}).status_code == 200
+    rows = api.get(f"/api/evaluations/{rid}/{vid}").json()["result"]["rows"]
+    assert next(r for r in rows if r["requirement_id"] == req)["flags"] == ["изменено рекрутером"]
+    assert (
+        api.patch(f"/api/evaluations/{rid}/{vid}/rows/D7", json={"status": "full"}).status_code
+        == 404
+    )
+    ev = api.get(f"/api/candidates/{f['candidate_id']}").json()["events"][-1]
+    assert ev["type"] == "edited" and ev["who"] == "Анна Смирнова (рекрутер)"
+
+
+def test_merge_and_dismiss(api: TestClient) -> None:
+    add_vacancy(api, "Python-разработчик\nТребования: Python")
+    (a,) = wait_batch(api, upload(api, [("a.txt", resume(5))]))
+    (b,) = wait_batch(api, upload(api, [("b.txt", resume(5) + "Ещё строка\n".encode())]))
+    (c,) = wait_batch(api, upload(api, [("c.txt", resume(5) + "Третья\n".encode())]))
+    a, b, c = a["candidate_id"], b["candidate_id"], c["candidate_id"]
+    assert api.get(f"/api/candidates/{b}").json()["possible_duplicate_of"] == a
+    assert api.post(f"/api/candidates/{b}/dismiss-duplicate").status_code == 200
+    assert api.get(f"/api/candidates/{b}").json()["possible_duplicate_of"] is None
+    assert api.post(f"/api/candidates/{b}/dismiss-duplicate").status_code == 409
+    assert api.post(f"/api/candidates/{a}/merge", json={"other": c}).status_code == 200
+    assert api.get(f"/api/candidates/{c}").status_code == 404
+    assert len(api.get(f"/api/candidates/{a}").json()["versions"]) == 2
+    assert api.post(f"/api/candidates/{a}/merge", json={"other": a}).status_code == 409
+    assert api.post(f"/api/candidates/{a}/merge", json={"other": 999}).status_code == 404
+
+
+def zip_of(entries: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for n, d in entries.items():
+            z.writestr(n, d)
+    return buf.getvalue()
+
+
+def test_upload_limits_before_unpack(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_read(*_: Any, **__: Any) -> bytes:
+        raise AssertionError("архив распакован")
+
+    monkeypatch.setattr("rvm.ingest.limits.MAX_BYTES", 100)
+    monkeypatch.setattr(zipfile.ZipFile, "read", no_read)
+    (f,) = wait_batch(api, upload(api, [("p.zip", zip_of({"big.txt": b"x" * 200}))]))
+    assert f["state"] == "error" and "big.txt" in f["message"]
+
+    monkeypatch.setattr("rvm.api.app.MAX_REQUEST_BYTES", 150)
+    two = [("1.zip", zip_of({"a.txt": b"x" * 80})), ("2.zip", zip_of({"b.txt": b"x" * 80}))]
+    r = api.post("/api/uploads", files=[("files", f) for f in two])
+    assert r.status_code == 413  # распакованный объём запроса — по заявленным размерам
+    r = api.post("/api/uploads", files=[("files", ("r.txt", b"x" * 200))])
+    assert r.status_code == 413  # сырой размер — до чтения
+
+
+def test_starts_in_demo_without_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    for k in ("LLM_API_KEY", "LLM_MODE", "RVM_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("RVM_CACHE", str(tmp_path / "cache.sqlite"))
+    with TestClient(create_app(db=tmp_path / "rvm.sqlite"), base_url="http://localhost") as c:
+        assert c.get("/api/health").json()["mode"] == "demo"
+    assert "LLM_API_KEY" in caplog.text and "RVM_SECRET" in caplog.text
