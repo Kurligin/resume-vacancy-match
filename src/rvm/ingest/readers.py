@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -15,12 +16,13 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 from striprtf.striprtf import rtf_to_text
 
-from rvm.ingest import ocr
+from rvm.ingest import limits, ocr
 from rvm.ingest.normalize import to_lines
 from rvm.models import Document, FileStatus
 
-MAX_BYTES = 15 * 1024 * 1024
+MAX_BYTES = limits.MAX_BYTES
 NO_TEXT_LAYER = ocr.NO_TEXT_LAYER
+HIDDEN_TEXT = "в документе скрытый текст (невидимый, белый или очень мелкий шрифт)"
 
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -38,19 +40,20 @@ class _FileError(Exception):
 def load_path(path: str | Path) -> Document:
     path = Path(path)
     if path.stat().st_size > MAX_BYTES:
-        return _fail(path.name, FileStatus.TOO_LARGE, "файл больше 15 МБ")
+        return _fail(path.name, FileStatus.TOO_LARGE, f"файл больше {MAX_BYTES // 1024 // 1024} МБ")
     return load_bytes(path.name, path.read_bytes())
 
 
 def load_text(name: str, text: str) -> Document:
     lines = to_lines(text.splitlines())
-    return Document(name=name, lines=lines, status=FileStatus.OK if lines else FileStatus.EMPTY)
+    doc = Document(name=name, lines=lines, status=FileStatus.OK if lines else FileStatus.EMPTY)
+    return _limit_text(doc)
 
 
 def load_bytes(name: str, data: bytes) -> Document:
     """Любые байты → Document; исключения наружу не выходят."""
     if len(data) > MAX_BYTES:
-        return _fail(name, FileStatus.TOO_LARGE, "файл больше 15 МБ")
+        return _fail(name, FileStatus.TOO_LARGE, f"файл больше {MAX_BYTES // 1024 // 1024} МБ")
     try:
         doc = _dispatch(name, data)
     except _FileError as e:
@@ -59,7 +62,40 @@ def load_bytes(name: str, data: bytes) -> Document:
         return _fail(name, FileStatus.BROKEN, f"файл повреждён: {type(e).__name__}: {e}")
     if not doc.lines and doc.status == FileStatus.OK:
         doc.status = FileStatus.EMPTY
+    return _limit_text(doc)
+
+
+def _limit_text(doc: Document) -> Document:
+    """Слишком длинный текст в модель не отдаём: это и деньги, и время."""
+    chars = sum(len(ln.text) for ln in doc.lines)
+    if len(doc.lines) > limits.MAX_LINES or chars > limits.MAX_CHARS:
+        return _fail(
+            doc.name,
+            FileStatus.TOO_LARGE,
+            f"слишком длинный текст: {len(doc.lines)} строк, {chars} символов "
+            f"(не больше {limits.MAX_LINES} строк и {limits.MAX_CHARS} символов)",
+        )
     return doc
+
+
+def check_zip(z: zipfile.ZipFile) -> None:
+    """Zip-бомба → BROKEN до распаковки.
+
+    zipfile не отдаёт больше заявленного file_size, поэтому сумма заявленных размеров — честная
+    верхняя граница.
+    """
+    infos = z.infolist()
+    unzipped = sum(i.file_size for i in infos)
+    packed = sum(i.compress_size for i in infos)
+    if unzipped > limits.MAX_UNZIPPED_BYTES:
+        raise _FileError(
+            FileStatus.BROKEN,
+            f"архив документа распаковывается больше чем в {limits.MAX_UNZIPPED_BYTES // 2**20} МБ",
+        )
+    if unzipped > limits.MAX_ZIP_RATIO * max(packed, 1):
+        raise _FileError(
+            FileStatus.BROKEN, "архив документа сжат подозрительно сильно (похоже на zip-бомбу)"
+        )
 
 
 def _fail(name: str, status: FileStatus, message: str) -> Document:
@@ -101,16 +137,52 @@ def _read_docx(name: str, data: bytes) -> Document:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         if "word/document.xml" not in z.namelist():
             raise _FileError(FileStatus.UNSUPPORTED, "zip-архив, но не документ Word")
+        check_zip(z)
     d = docx.Document(io.BytesIO(data))
     body: list[str] = []
     _walk(d.element.body, body)
     footers: list[str] = []
+    roots = [d.element.body]
     seen: set[str] = set()
     for rel in d.part.rels.values():
         if rel.reltype in (RT.HEADER, RT.FOOTER) and rel.target_ref not in seen:
             seen.add(rel.target_ref)
+            roots.append(rel.target_part.element)
             _walk(rel.target_part.element, footers)
-    return Document(name=name, lines=to_lines(body, footers))
+    hidden = any(_run_look(r) for root in roots for r in root.iter(_W + "r") if _run_text(r))
+    return Document(
+        name=name, lines=to_lines(body, footers), warnings=[HIDDEN_TEXT] if hidden else []
+    )
+
+
+def _on(el: etree._Element | None) -> bool:
+    """Включённый флажок rPr: <w:vanish/> или val не 0/false/off."""
+    return el is not None and el.get(_W + "val", "true").lower() not in ("0", "false", "off")
+
+
+def _run_look(r: etree._Element) -> str | None:
+    """«hidden» — run не показывается; «faint» — белый или мельче 4 pt; None — обычный.
+
+    shortcut: смотрим только прямое оформление run, не стили (rStyle) — набивку через стиль
+    не поймаем; доработать, если встретится.
+    """
+    rpr = r.find(_W + "rPr")
+    if rpr is None:
+        return None
+    if _on(rpr.find(_W + "vanish")) or _on(rpr.find(_W + "webHidden")):
+        return "hidden"
+    color = rpr.find(_W + "color")
+    size = rpr.find(_W + "sz")
+    if color is not None and (color.get(_W + "val") or "").upper() == "FFFFFF":
+        return "faint"
+    half_points = (size.get(_W + "val") or "") if size is not None else ""
+    if half_points.isdigit() and int(half_points) < 8:
+        return "faint"  # меньше 4 pt
+    return None
+
+
+def _run_text(r: etree._Element) -> bool:
+    return any((t.text or "").strip() for t in r.iter(_W + "t"))
 
 
 def _walk(container: etree._Element, out: list[str]) -> None:
@@ -143,6 +215,9 @@ def _paragraph_text(p: etree._Element) -> str:
     for el in p.iter():
         if any(a.tag == _MC_FALLBACK for a in el.iterancestors()):
             continue  # запасная копия надписи, иначе текст задвоится
+        parent = el.getparent()
+        if parent is not None and parent.tag == _W + "r" and _run_look(parent) == "hidden":
+            continue  # невидимый run: набивка ключевыми словами не должна стать цитатой
         tag = el.tag
         if tag == _W + "t":
             parts.append(el.text or "")
@@ -167,7 +242,16 @@ def _read_pdf(name: str, data: bytes) -> Document:
             ok = 0
         if not ok:
             raise _FileError(FileStatus.ENCRYPTED, "PDF защищён паролем")
-    pages = [page.extract_text() or "" for page in reader.pages]
+    if len(reader.pages) > limits.MAX_PDF_PAGES:
+        raise _FileError(FileStatus.TOO_LARGE, f"в PDF больше {limits.MAX_PDF_PAGES} страниц")
+    # shortcut: время проверяется между страницами, зависшую страницу не прервёт;
+    # нужен отдельный процесс, если такие PDF появятся.
+    deadline = time.monotonic() + limits.PDF_SECONDS
+    pages: list[str] = []
+    for page in reader.pages:
+        if time.monotonic() > deadline:
+            raise _FileError(FileStatus.TOO_LARGE, "PDF читается слишком долго")
+        pages.append(page.extract_text() or "")
     lines = to_lines(pages)
     if not lines:
         return ocr.read_pdf(name, data)

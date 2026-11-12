@@ -4,13 +4,15 @@ import io
 import os
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytesseract
 import pytest
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from pypdf import PdfWriter
 from rapidfuzz import fuzz
 
-from rvm.ingest import load_bytes, load_path
+from rvm.ingest import load_bytes, load_path, ocr
 from rvm.ingest.ocr import ocr_ready
 from rvm.models import Document, FileStatus
 
@@ -136,3 +138,71 @@ def test_no_tesseract(monkeypatch: pytest.MonkeyPatch) -> None:
     doc = load_bytes("blank.png", _png(Image.new("L", (400, 400), 255)))
     assert doc.status == FileStatus.EMPTY
     assert any("Tesseract" in w for w in doc.warnings)
+
+
+# --- лимиты OCR ---
+
+
+def _no_tesseract_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_a: object, **_k: object) -> None:
+        raise AssertionError("распознавание не должно запускаться")
+
+    monkeypatch.setattr(ocr.pytesseract, "image_to_data", fail)
+
+
+def _png1(size: tuple[int, int]) -> bytes:
+    buf = io.BytesIO()
+    Image.new("1", size, 1).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_image_over_pixel_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_tesseract_call(monkeypatch)
+    doc = load_bytes("big.png", _png1((7000, 7000)))
+    assert doc.status == FileStatus.TOO_LARGE and not doc.lines
+
+
+def test_image_decompression_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_tesseract_call(monkeypatch)
+    data = _png1((20000, 20000))
+    assert len(data) < 1024 * 1024
+    doc = load_bytes("bomb.png", data)
+    assert doc.status == FileStatus.BROKEN and not doc.lines
+    assert "пиксел" in doc.warnings[0]
+
+
+def _blank_pdf(pages: int, side: float = 200) -> bytes:
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(width=side, height=side)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def test_scan_pdf_too_many_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_tesseract_call(monkeypatch)
+    doc = load_bytes("scan.pdf", _blank_pdf(11))
+    assert doc.status == FileStatus.TOO_LARGE
+
+
+def test_pdf_page_render_within_budget() -> None:
+    pdf = ocr.pdfium.PdfDocument(_blank_pdf(1, side=1700))  # 1700 pt при 300 dpi ≈ 50 МП
+    try:
+        (img,) = list(ocr._render(pdf))
+    finally:
+        pdf.close()
+    assert img.width * img.height <= ocr.MAX_PIXELS
+
+
+@needs_ocr
+def test_tesseract_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def slow(*_a: object, **kw: Any) -> None:
+        seen.update(kw)
+        raise RuntimeError("Tesseract process timeout")
+
+    monkeypatch.setattr(ocr.pytesseract, "image_to_data", slow)
+    doc = load_bytes("blank.png", _png(Image.new("L", (400, 400), 255)))
+    assert doc.status == FileStatus.TOO_LARGE and 0 < seen["timeout"] <= ocr.OCR_PAGE_SECONDS
