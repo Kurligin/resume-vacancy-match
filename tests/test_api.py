@@ -201,3 +201,13 @@ def test_case_files_card(api: TestClient) -> None:
     assert [f["state"] for f in done] == ["done"] * len(res)
     card = api.get(f"/api/candidates/{done[0]['candidate_id']}").json()
     assert len({e["vacancy_id"] for e in card["evaluations"]}) == 3
+
+
+def test_ui_static(api: TestClient) -> None:
+    page = api.get("/")
+    assert page.status_code == 200 and "text/html" in page.headers["content-type"]
+    assert 'src="/app.js"' in page.text and 'href="/app.css"' in page.text
+    js, css = api.get("/app.js"), api.get("/app.css")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert css.status_code == 200 and ".wrap" in css.text
+    assert "http" not in js.text.replace("/api/", "")  # без CDN: работает без интернета

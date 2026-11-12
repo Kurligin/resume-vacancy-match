@@ -1,15 +1,13 @@
-import json
 import os
 import re
 from datetime import date
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
 from rvm.ingest import load_path
 from rvm.llm import LLMClient
+from rvm.llm.fake import RoutingFake
 from rvm.models import Document, Line, Status
 from rvm.pipeline import analyze as analyze_mod
 from rvm.pipeline.analyze import Report, ReportStatus, analyze, guess_applied
@@ -24,72 +22,6 @@ EXTERNAL = "https://openrouter.ai/api/v1"
 @pytest.fixture(autouse=True)
 def _salt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RVM_HASH_SALT", "тестовый-ключ-16+символов")
-
-
-class RoutingFake:
-    """Транспорт модели: ответ по имени схемы; пишет все сообщения; fail — ломает сопоставление
-    для вакансии, в требованиях которой есть эта подстрока."""
-
-    def __init__(self, fail: str | None = None) -> None:
-        self.fail = fail
-        self.calls: list[dict[str, Any]] = []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **kwargs: Any) -> SimpleNamespace:
-        self.calls.append(kwargs)
-        name = kwargs["response_format"]["json_schema"]["name"]
-        user = kwargs["messages"][-1]["content"]
-        if name == "_Items":
-            reply = {
-                "items": [
-                    {
-                        "text": f"требование {i} {user.splitlines()[0][:30]}",
-                        "section": "must",
-                        "kind": "skill",
-                        "years": None,
-                        "source_line": i,
-                    }
-                    for i in (1, 2)
-                ]
-            }
-        elif name == "_Markup":
-            reply = {
-                "periods": [],
-                "education": [],
-                "city": None,
-                "work_formats": [],
-                "declared_total_raw": None,
-                "letter_lines": [],
-            }
-        else:
-            if self.fail and any(self.fail in m["content"] for m in kwargs["messages"]):
-                return self._reply("не json")
-            ids = re.findall(r"^(R\d+):", user, re.MULTILINE)
-            reply = {
-                "items": [
-                    {
-                        "requirement_id": i,
-                        "status": "unknown",
-                        "evidence": [],
-                        "exceeds": None,
-                        "note": "",
-                        "self_claim": False,
-                        "skill": None,
-                    }
-                    for i in ids
-                ]
-            }
-        return self._reply(json.dumps(reply, ensure_ascii=False))
-
-    @staticmethod
-    def _reply(content: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    def sent(self) -> str:
-        return "\n".join(m["content"] for c in self.calls for m in c["messages"])
 
 
 def make_llm(tmp_path: Path, fake: RoutingFake, base_url: str = EXTERNAL) -> LLMClient:
