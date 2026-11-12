@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import hmac
 import os
 import re
 from collections import Counter
@@ -21,6 +22,9 @@ _LINK = re.compile(
     r"|\b(?:t\.me|telegram\.me|vk\.com|vk\.ru|github\.com|gitlab\.com|linkedin\.com"
     r"|hh\.ru/resume|habr\.com)(?:/\S*)?"
 )
+# сайт без схемы: личный (ivanov.ru) от сайта работодателя не отличить — маскируем любой
+# начало только с начала токена: иначе на длинном «a-a-a…» квадратичный откат
+_SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:ru|com|рф|me|io|org|net|su)\b(?:/\S*)?")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _PHONE = re.compile(
     r"(?<![\w+])(?:(?:\+\d{1,3}|[78])[\s-]*\(?\d{3}\)?|\(\d{3}\))(?:[\s-]*\d){7}(?!\d)"
@@ -46,6 +50,7 @@ _AGE_NEAR = re.compile(r"(?i)\b\d{1,3}\s*(?:год|года|лет)\b")
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ссылка", _LINK),
     ("почта", _EMAIL),
+    ("ссылка", _SITE),
     ("телефон", _PHONE),
     ("ссылка", _NICK),
     ("дата рождения", _BIRTH),
@@ -53,6 +58,10 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("пол", _SEX),
     ("адрес", _ADDRESS),
 ]
+# Грубые проверки assert_clean, независимые от маски: цепочка цифр с разделителями, «@», домены
+_DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
+_DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:ru|com|рф|me|io|org|net|su)\b")
+_MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
 _NAME_TAGS = ("Name", "Surn", "Patr")
 
@@ -150,15 +159,27 @@ def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, s
 
 
 def contact_hash(value: str) -> str:
-    """sha256 нормализованного телефона или почты с солью RVM_HASH_SALT (склейка дублей)."""
+    """HMAC-SHA256 нормализованного телефона или почты с ключом RVM_HASH_SALT (склейка дублей)."""
     value = value.strip().lower()
     if "@" not in value:
         digits = re.sub(r"\D", "", value)
         if len(digits) == 11 and digits[0] in "78":
             digits = digits[1:]
         value = "7" + digits if len(digits) == 10 else digits
-    salt = os.environ.get("RVM_HASH_SALT", "")
-    return hashlib.sha256((salt + value).encode()).hexdigest()
+    key = os.environ.get("RVM_HASH_SALT", "")
+    if len(key) < _MIN_KEY:
+        raise RuntimeError(
+            f"не задан ключ RVM_HASH_SALT (нужно не короче {_MIN_KEY} символов): "
+            "без него отпечатки контактов подбираются перебором"
+        )
+    return hmac.new(key.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+def _neutral_name(lines: list[Line]) -> str:
+    """Имя без ФИО: «resume_» + буквы хэша маскированного текста (цифр нет — грубая проверка
+    не спутает их с телефоном; от ФИО и имени файла не зависит)."""
+    digest = hashlib.sha256("\n".join(ln.text for ln in lines).encode()).hexdigest()
+    return "resume_" + "".join(chr(ord("a") + int(c, 16)) for c in digest[:10])
 
 
 def mask(doc: Document, filename: str | None = None) -> Masked:
@@ -169,22 +190,49 @@ def mask(doc: Document, filename: str | None = None) -> Masked:
         text, hits = _mask_line(line.text, known)
         lines.append(line.model_copy(update={"text": text}))
         table += [(line.n, kind, value) for kind, value in hits]
+    warnings = [_mask_line(w, known)[0] for w in doc.warnings]
     hashes = sorted({contact_hash(v) for _, k, v in table if k in ("телефон", "почта")})
+    update = {"lines": lines, "warnings": warnings, "name": _neutral_name(lines)}
     return Masked(
-        doc=doc.model_copy(update={"lines": lines}),
+        doc=doc.model_copy(update=update),
         replacements=table,
         contact_hashes=hashes,
         found=dict(Counter(kind for _, kind, _ in table)),
     )
 
 
+def _is_date_or_sum(run: str) -> bool:
+    """Годы и даты («01.2020 - 12.2022») или сумма с тысячами («1 500 000») — не телефон."""
+    groups = re.findall(r"\d+", run)
+    years = [g for g in groups if len(g) == 4 and g[:2] in ("19", "20")]
+    if years and all(len(g) <= 2 or g in years for g in groups):
+        return True
+    return len(groups[0]) <= 3 and groups[-1] == "000" and all(len(g) == 3 for g in groups[1:])
+
+
+def _rough_hits(text: str) -> list[str]:
+    """Проверки, которые не зависят от детекторов маски: ловят то, что маска пропустила."""
+    hits = []
+    for m in _DIGIT_RUN.finditer(text):
+        if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
+            hits.append("цифры")
+    if "@" in text:
+        hits.append("@")
+    hits += ["домен"] * len(_DOMAIN.findall(text))
+    return hits
+
+
 def assert_clean(masked: Masked) -> None:
-    """Повторный прогон детекторов по маскированному тексту; нашлось — PrivacyError."""
+    """Повторный прогон детекторов и грубые проверки по тексту, имени и предупреждениям;
+    нашлось — PrivacyError."""
     known = [_lemmas(v) for _, kind, v in masked.replacements if kind == "ФИО"]
+    known += [_lemmas(w) for w in _filename_words(masked.doc.name)]
     left: Counter[str] = Counter()
-    for line in masked.doc.lines:
-        _, hits = _mask_line(line.text, known)
+    texts = [masked.doc.name, *masked.doc.warnings, *(ln.text for ln in masked.doc.lines)]
+    for text in texts:
+        _, hits = _mask_line(text, known)
         left.update(kind for kind, _ in hits)
+        left.update(_rough_hits(text))
     if left:
         # в сообщении только типы и число, без самих значений
         raise PrivacyError(f"после маски остались данные: {dict(left)}")

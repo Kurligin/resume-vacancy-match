@@ -7,12 +7,15 @@ from collections.abc import Iterable, Iterator
 
 import pypdfium2 as pdfium
 import pytesseract
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 from rvm.ingest.limits import MAX_OCR_PAGES, MAX_PIXELS, OCR_PAGE_SECONDS, OCR_TOTAL_SECONDS
 from rvm.ingest.normalize import to_lines
 from rvm.models import Document, FileStatus
+
+# Единственный белый список картинок: без него Pillow откроет EPS и вызовет Ghostscript
+IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "TIFF", "BMP", "GIF", "HEIF"]
 
 LANGS = "rus+eng"
 DPI = 300
@@ -45,9 +48,11 @@ def _refuse(name: str, status: FileStatus, message: str) -> Document:
 
 def read_image(name: str, data: bytes) -> Document:
     try:
-        img = Image.open(io.BytesIO(data))  # читает только заголовок
+        img = Image.open(io.BytesIO(data), formats=IMAGE_FORMATS)  # читает только заголовок
     except Image.DecompressionBombError:
         return _refuse(name, FileStatus.BROKEN, "картинка на сотни мегапикселей, похоже на бомбу")
+    except UnidentifiedImageError:
+        return _refuse(name, FileStatus.BROKEN, "неподдерживаемый или битый формат картинки")
     if img.width * img.height > MAX_PIXELS:
         return _refuse(
             name, FileStatus.TOO_LARGE, f"картинка больше {MAX_PIXELS // 10**6} мегапикселей"

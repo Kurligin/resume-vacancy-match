@@ -11,6 +11,11 @@ DATA_DIR = os.environ.get("RVM_DATA_DIR")
 needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
 
 
+@pytest.fixture(autouse=True)
+def hash_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVM_HASH_SALT", "тестовый-ключ-16+символов")
+
+
 def doc_of(*texts: str, name: str = "резюме.txt") -> Document:
     return Document(name=name, lines=[Line(n=i + 1, text=t) for i, t in enumerate(texts)])
 
@@ -103,10 +108,21 @@ def test_contact_hash_normalized() -> None:
     assert m1.contact_hashes == m2.contact_hashes == [contact_hash("89161234567")]
 
 
-def test_contact_hash_salted(monkeypatch: pytest.MonkeyPatch) -> None:
-    plain = contact_hash("89161234567")
-    monkeypatch.setenv("RVM_HASH_SALT", "соль")
-    assert contact_hash("89161234567") != plain
+def test_contact_hash_keyed(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = contact_hash("89161234567")
+    monkeypatch.setenv("RVM_HASH_SALT", "другой-ключ-не-короче-16")
+    assert contact_hash("89161234567") != first
+    assert len(first) == 64
+
+
+@pytest.mark.parametrize("key", [None, "", "короткий-ключ"])
+def test_contact_hash_needs_key(monkeypatch: pytest.MonkeyPatch, key: str | None) -> None:
+    if key is None:
+        monkeypatch.delenv("RVM_HASH_SALT")
+    else:
+        monkeypatch.setenv("RVM_HASH_SALT", key)
+    with pytest.raises(RuntimeError, match="RVM_HASH_SALT"):
+        contact_hash("89161234567")
 
 
 def test_swap_identity() -> None:
@@ -162,3 +178,74 @@ def test_swap_identity_filename_overlapping_names() -> None:
     out = swap_identity(src, "Иванова Мария", "ж")
     assert out.name == "Иванова Мария_резюме 2.docx"
     assert out.lines[0].text == "Иванова Мария"
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "8 916 123 45 67",
+        "ivan@mail",
+        "t.me/ivan",
+        "1234567",
+        "123-45-67",
+        "9161234567",
+        "сайт ivanov.ru",
+        "@",
+        "91 61 23 45 67",
+        "socket.ivanov.ru",
+    ],
+)
+def test_assert_clean_rough_checks(planted: str) -> None:
+    m = mask(doc_of("Опыт 5 лет"))
+    m.doc.lines[0].text += f" {planted}"
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+
+
+def test_sites_without_scheme_masked() -> None:
+    m = mask(doc_of("Сайт: ivanov.ru, работал в mkb.ru/about"))
+    assert m.doc.lines[0].text == "Сайт: [ссылка], работал в [ссылка]"
+    assert_clean(m)
+
+
+def test_assert_clean_keeps_masks_and_dates() -> None:
+    m = mask(
+        doc_of(
+            "Телефон: +7 (916) 123-45-67, почта a.ivanov@mail.ru",
+            "2019 - 2023, 01.2020 — 12.2022, 01.09.2015-30.06.2019",
+            "Зарплата от 150 000 руб., 7 лет 9 месяцев, Python 3.12, 2019-2023",
+        )
+    )
+    assert "[телефон]" in m.doc.lines[0].text
+    assert_clean(m)
+
+
+def test_filename_and_warnings_masked() -> None:
+    src = Document(
+        name="Иванов Алексей_резюме 1.docx",
+        lines=[Line(n=1, text="Иванов Алексей"), Line(n=2, text="Python")],
+        warnings=["Иванов Алексей: звонить 8 916 123 45 67"],
+    )
+    m = mask(src)
+    assert "Иванов" not in m.doc.name and "Алексей" not in m.doc.name
+    assert m.doc.name.startswith("resume")
+    assert m.doc.warnings == ["[ФИО] [ФИО]: звонить [телефон]"]
+    assert_clean(m)
+    m.doc.warnings.append("ivan@mail")
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+    m.doc.warnings.pop()
+    m.doc.name = "Иванов Алексей_резюме 1.docx"
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+
+
+def test_rough_checks_linear_on_long_tokens() -> None:
+    import time
+
+    from rvm.privacy.mask import _SITE, _rough_hits
+
+    long = "a-" * 30_000 + " " + "b" * 60_000
+    start = time.perf_counter()
+    assert not _rough_hits(long) and not _SITE.search(long)
+    assert time.perf_counter() - start < 0.5

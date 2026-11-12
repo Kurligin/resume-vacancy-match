@@ -31,10 +31,9 @@ _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 _ODT_TEXT = "application/vnd.oasis.opendocument.text"
 _ODF_T = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
-_HTML_START = re.compile(
-    r"\s*(?:<\?xml[^>]*>\s*)?(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html|head|body)\b",
-    re.IGNORECASE | re.DOTALL,
-)
+_XML_DECL = re.compile(r"\s*<\?xml[^>]*>")
+_HTML_TAG = re.compile(r"<(?:!doctype\s+html|html|head|body)\b", re.IGNORECASE)
+_MAX_LEADING_COMMENTS = 20
 _HTML_BLOCKS = (
     "p",
     "div",
@@ -64,7 +63,6 @@ _HTML_BLOCKS = (
 # Картинки, которые отдаём в OCR; HEIF/HEIC открывает pillow-heif. Надёжные сигнатуры
 # (битый файл с ними → BROKEN); BMP и HEIC узнаём, только если Pillow их открыл.
 _IMAGE_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8", b"II*\x00", b"MM\x00*")
-_IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "TIFF", "BMP", "GIF", "HEIF"]
 # Текстовый слой PDF: меньше этой доли букв алфавита или меньше этого числа букв на странице →
 # страница считается сканом (или битым ToUnicode) и уходит в OCR.
 MIN_LETTER_SHARE = 0.5
@@ -156,18 +154,38 @@ def _dispatch(name: str, data: bytes) -> Document:
         if "EncryptedPackage".encode("utf-16-le") in data:
             raise _FileError(FileStatus.ENCRYPTED, "документ защищён паролем")
         return _read_doc(name, data)
-    if data.startswith(_IMAGE_SIGNATURES) or data[8:12] == b"WEBP" or _is_image(data):
+    if data.startswith(_IMAGE_SIGNATURES) or _is_webp(data) or _is_image(data):
         return ocr.read_image(name, data)
     text = _decode_text(data)
-    if _HTML_START.match(text[:4096]):
+    if _is_html(text[:4096]):
         return _read_html(name, text)
     return load_text(name, text)
+
+
+def _is_webp(data: bytes) -> bool:
+    return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def _is_html(text: str) -> bool:
+    """Начальный тег HTML после объявления XML и ведущих комментариев (линейно, без регулярки)."""
+    m = _XML_DECL.match(text)
+    pos = m.end() if m else 0
+    for _ in range(_MAX_LEADING_COMMENTS):
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if not text.startswith("<!--", pos):
+            break
+        end = text.find("-->", pos + 4)
+        if end < 0:
+            return False
+        pos = end + 3
+    return _HTML_TAG.match(text, pos) is not None
 
 
 def _is_image(data: bytes) -> bool:
     """Картинку определяет сам Pillow по заголовку; текст «BMW…» с подписью BMP — не картинка."""
     try:
-        Image.open(io.BytesIO(data), formats=_IMAGE_FORMATS).close()
+        Image.open(io.BytesIO(data), formats=ocr.IMAGE_FORMATS).close()
     except Image.DecompressionBombError:
         return True  # отказ с понятной причиной даст ocr.read_image
     except Exception:  # noqa: BLE001 — любой отказ Pillow значит «не картинка»
