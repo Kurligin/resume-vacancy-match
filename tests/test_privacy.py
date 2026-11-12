@@ -6,6 +6,7 @@ import pytest
 
 from rvm.models import Document, Line
 from rvm.privacy import PrivacyError, assert_clean, contact_hash, mask, swap_identity
+from rvm.privacy.mask import _rough_hits
 from rvm.refs.skills import find_in_lines
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
@@ -340,3 +341,94 @@ def test_spaced_at_masked_and_caught(line: str, kind: str) -> None:
     raw.doc.lines[0].text = line
     with pytest.raises(PrivacyError):
         assert_clean(raw)
+
+
+def test_latin_filename_words_are_not_names() -> None:
+    line = "Опыт: Python, Django, Developer"
+    m = mask(doc_of(line, "Иванов Иван"), "Резюме Python Developer.pdf")
+    assert m.doc.lines[0].text == line
+    assert m.doc.lines[1].text == "[ФИО] [ФИО]"
+    assert_clean(m)
+
+
+def test_vacancy_masked_without_name_words() -> None:
+    title = "Frontend-разработчик (Vue 3, Tailwind CSS)"
+    m = mask(doc_of(title, "Стек: Vue, Tailwind CSS, Frontend", name=title), names_from_file=False)
+    assert text_of(m.doc) == f"{title}\nСтек: Vue, Tailwind CSS, Frontend"
+    assert {"Vue", "Tailwind CSS"} <= {h.canonical for h in find_in_lines(m.doc.lines)}
+    assert_clean(m)
+
+
+@pytest.mark.parametrize(
+    "line, leaks",
+    [
+        ("ИВАНОВ ИВАН ИВАНОВИЧ", ("ИВАНОВ", "ИВАН")),
+        ("ПЕТРОВА Анна", ("ПЕТРОВА", "Анна")),
+        ("Руководитель: Сидоров П.А.", ("Сидоров",)),
+        ("петров иван сергеевич", ("петров", "иван", "сергеевич")),
+        ("Ivan Petrov", ("Ivan", "Petrov")),
+        ("Dmitry Kuznetsov, Data Scientist", ("Dmitry", "Kuznetsov")),
+        ("Telegram: ivan_petrov", ("ivan_petrov",)),
+        ("Skype: live:ivan.petrov", ("ivan",)),
+        ("Сайт: ivanpetrov.dev", ("ivanpetrov",)),
+        ("Блог petrov.tech/notes, ivan.pro, site.info", ("petrov", "ivan.pro", "site.info")),
+    ],
+)
+def test_names_and_nicks_masked_and_caught(line: str, leaks: tuple[str, ...]) -> None:
+    m = mask(doc_of(line, "Опыт 5 лет"))
+    for leak in leaks:
+        assert leak not in m.doc.lines[0].text
+    assert "[" in m.doc.lines[0].text
+    assert_clean(m)
+    # без маски грубая проверка ловит сама, без детекторов
+    assert _rough_hits(line, head=True)
+    m.doc.lines[0].text = line
+    with pytest.raises(PrivacyError):
+        assert_clean(m)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Spring Boot, Data Science, Apache Kafka",
+        "Работал в Альфа Банк, Яндекс Практикум",
+        "Файлы main.py, package.json; React.memo, Next.js, Vue.js, ASP.NET",
+        "Знаю GitHub Actions и Telegram Bot API",
+        "Python Developer",
+    ],
+)
+def test_tech_and_orgs_not_masked(line: str) -> None:
+    m = mask(doc_of(line))
+    assert m.doc.lines[0].text == line
+    assert_clean(m)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "ORCID: 0000-0002-1825-009X",
+        "DOI: 10.1103/PhysRevB.97.045123",
+        "Грант РФФИ № 18-02-00123, 2019-2021",
+        "ISBN 978-5-04-089345-3",
+        "ИНН 7701234567",
+    ],
+)
+def test_science_numbers_masked(line: str) -> None:
+    m = mask(doc_of("Публикации", line))
+    text = m.doc.lines[1].text
+    assert "[номер]" in text and not re.search(r"\d{3}", text.replace("2019-2021", ""))
+    assert_clean(m)
+
+
+@needs_data
+def test_case_vacancies_skills_intact() -> None:
+    from rvm.ingest import load_path
+
+    files = [p for p in sorted(Path(DATA_DIR or ".").glob("*.docx")) if p not in case_resumes()]
+    assert len(files) == 3
+    for path in files:
+        src = load_path(path)
+        m = mask(src, names_from_file=False)
+        assert_clean(m)
+        before = {h.canonical for h in find_in_lines(src.lines)}
+        assert {h.canonical for h in find_in_lines(m.doc.lines)} == before, path.name

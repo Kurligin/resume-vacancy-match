@@ -224,6 +224,15 @@ def test_decide_batch(app: Any, api: TestClient, db: Path) -> None:
         )
 
 
+def test_privacy_error_needs_file_check(api: TestClient, db: Path) -> None:
+    rep = report().model_copy(
+        update={"status": ReportStatus.PRIVACY_ERROR, "vacancies": [], "error": "обезличивание"}
+    )
+    seed(db, 1, rep)
+    t = triage(api)
+    assert t["check_file"] == 1 and t["pending"] == 0 and where(t) == {}
+
+
 def test_triage_by_batch(api: TestClient, db: Path) -> None:
     assert api.get("/api/triage", params={"batch": "нет"}).status_code == 404
     other = seed(db, 1, report(85))
