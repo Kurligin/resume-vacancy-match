@@ -64,7 +64,7 @@ async function api(path, opt = {}) {
     } catch {
       /* тело не JSON */
     }
-    throw new Error(msg || `сервер ответил ${r.status}`);
+    throw Object.assign(new Error(msg || `сервер ответил ${r.status}`), { status: r.status });
   }
   return opt.raw ? r : r.status === 204 ? null : r.json();
 }
@@ -73,6 +73,9 @@ const post = (path, body) => api(path, { method: "POST", headers: { "Content-Typ
 const stateBox = (kind, text) =>
   `<div class="card state ${kind === "err" ? "err" : ""}">${ic(kind === "err" ? "alert" : kind === "empty" ? "inbox" : "clock")}${esc(text)}</div>`;
 const failed = (e) => stateBox("err", "Не удалось загрузить данные: " + e.message + ". Обновите страницу."); // stateBox экранирует
+// 404 по кандидату: руководителю его не передали или рекрутер его удалил — перезагрузка не поможет
+const lost = (cls) =>
+  `<div class="${cls} state">${ic("user")}<span>${mgr() ? "Этот кандидат вам не передан" : "Кандидат не найден"}</span><a class="btn btn-ghost" href="#/candidates">‹ К списку кандидатов</a></div>`;
 const names = {}; // ФИО из ответов API — только при включённом переключателе
 // ФИО руководителю API отдаёт, только если пакет ушёл с «ФИО в документе»
 const nameText = (id) => ((st.pii || mgr()) && names[id]) || `Кандидат ${id}`;
@@ -218,7 +221,7 @@ async function renderCard(id) {
     c = await api(`/api/candidates/${id}?pii=${st.pii}`);
     remember([c]);
   } catch (e) {
-    $("#doc").innerHTML = `<div class="state err">${ic("alert")}${esc(e.message)}</div>`;
+    $("#doc").innerHTML = e.status === 404 ? lost("") : `<div class="state err">${ic("alert")}${esc(e.message)}</div>`;
     return;
   }
   view.card = c;
@@ -301,7 +304,7 @@ async function renderCand(r) {
       remember([card]);
       view.cand = { id: r.id, card, report };
     } catch (e) {
-      $("#top").innerHTML = failed(e);
+      $("#top").innerHTML = e.status === 404 ? lost("card") : failed(e);
       return;
     }
   }
@@ -406,11 +409,11 @@ function topVacs(i) {
   const col = (id) => (st.pii && names[id] ? esc(names[id].split(" ")[0]) : `К${id}`);
   if (cols.length)
     h += `<div class="card heat"><div class="heat-h"><b>${ic("grid", "c-acc")}Все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
-   <div style="overflow-x:auto"><div class="hg" style="grid-template-columns:minmax(200px,1fr) repeat(${cols.length},56px)"><span></span>${cols.map((id) => `<span class="ch" title="${cname(id)}">${col(id)}</span>`).join("")}
+   <div class="hscroll"><div class="hg" style="grid-template-columns:minmax(180px,280px) repeat(${cols.length},minmax(64px,88px))"><span class="hcorner"></span>${cols.map((id) => `<span class="ch" title="${cname(id)}">${col(id)}</span>`).join("")}
    ${vacs
      .map(
        (x, k) =>
-         `<button class="hname ${k === i ? "on" : ""}" data-href="#/vacancies/${encodeURIComponent(x.id)}">${ic("brief", "i-sm")}${esc(x.title)}</button>${cols
+         `<button class="hname ${k === i ? "on" : ""}" data-href="#/vacancies/${encodeURIComponent(x.id)}" title="${esc(x.title)}">${ic("brief", "i-sm")}<span class="ht">${esc(x.title)}</span></button>${cols
            .map((id) => {
              const c = ranks[k].find((y) => y.id === id);
              return c
@@ -1154,7 +1157,10 @@ document.addEventListener("click", async (e) => {
   } else if ((el = on("[data-login]"))) login({ role: el.dataset.login });
   else if (on("#logout")) {
     await post("/api/logout").catch(() => {});
-    showLogin();
+    // чистый лист следующему пользователю: без чужого адреса, кэша экранов и пакета загрузки
+    sessionStorage.removeItem("rvm-batch");
+    history.replaceState(null, "", location.pathname);
+    location.reload();
   } else if ((el = on("[data-bk]"))) {
     st.bk = el.dataset.bk;
     st.ti = 0;
