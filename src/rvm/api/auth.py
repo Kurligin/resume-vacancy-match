@@ -10,8 +10,9 @@ import hmac
 import os
 import secrets
 import time
-from typing import Literal
+from typing import Annotated, Any, Literal
 
+from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel
 
 Role = Literal["recruiter", "manager"]
@@ -87,3 +88,23 @@ def read(secret: bytes, token: str | None) -> User | None:
     if time.time() - int(ts) > MAX_AGE:
         return None
     return USERS.get(login)
+
+
+def _need(role: Role) -> Any:
+    def dep(request: Request) -> User:
+        user: User = request.state.user  # без сессии сюда не доходит: 401 в middleware
+        if user.role != role:
+            raise HTTPException(403, f"доступно роли «{ROLE_NAMES[role]}»")
+        return user
+
+    return Depends(dep)
+
+
+def _current(request: Request) -> User:
+    user: User = request.state.user
+    return user
+
+
+Anyone = Annotated[User, Depends(_current)]
+Recruiter = Annotated[User, _need("recruiter")]
+Manager = Annotated[User, _need("manager")]
