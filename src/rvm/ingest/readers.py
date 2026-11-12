@@ -10,8 +10,10 @@ import zipfile
 from pathlib import Path
 
 import docx
+import lxml.html
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from lxml import etree
+from PIL import Image
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 from striprtf.striprtf import rtf_to_text
@@ -27,6 +29,47 @@ HIDDEN_TEXT = "в документе скрытый текст (невидимы
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+_ODT_TEXT = "application/vnd.oasis.opendocument.text"
+_ODF_T = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
+_HTML_START = re.compile(
+    r"\s*(?:<\?xml[^>]*>\s*)?(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html|head|body)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_HTML_BLOCKS = (
+    "p",
+    "div",
+    "br",
+    "li",
+    "tr",
+    "td",
+    "th",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "blockquote",
+    "pre",
+    "dt",
+    "dd",
+    "table",
+    "ul",
+    "ol",
+)
+# Картинки, которые отдаём в OCR; HEIF/HEIC открывает pillow-heif. Надёжные сигнатуры
+# (битый файл с ними → BROKEN); BMP и HEIC узнаём, только если Pillow их открыл.
+_IMAGE_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8", b"II*\x00", b"MM\x00*")
+_IMAGE_FORMATS = ["JPEG", "PNG", "WEBP", "TIFF", "BMP", "GIF", "HEIF"]
+# Текстовый слой PDF: меньше этой доли букв алфавита или меньше этого числа букв на странице →
+# страница считается сканом (или битым ToUnicode) и уходит в OCR.
+MIN_LETTER_SHARE = 0.5
+MIN_PAGE_LETTERS = 20
+_LETTER = re.compile(r"[A-Za-zА-Яа-яЁё]")
 
 
 class _FileError(Exception):
@@ -113,12 +156,31 @@ def _dispatch(name: str, data: bytes) -> Document:
         if "EncryptedPackage".encode("utf-16-le") in data:
             raise _FileError(FileStatus.ENCRYPTED, "документ защищён паролем")
         return _read_doc(name, data)
-    if data.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n")):
+    if data.startswith(_IMAGE_SIGNATURES) or data[8:12] == b"WEBP" or _is_image(data):
         return ocr.read_image(name, data)
-    return load_text(name, _decode_text(data))
+    text = _decode_text(data)
+    if _HTML_START.match(text[:4096]):
+        return _read_html(name, text)
+    return load_text(name, text)
+
+
+def _is_image(data: bytes) -> bool:
+    """Картинку определяет сам Pillow по заголовку; текст «BMW…» с подписью BMP — не картинка."""
+    try:
+        Image.open(io.BytesIO(data), formats=_IMAGE_FORMATS).close()
+    except Image.DecompressionBombError:
+        return True  # отказ с понятной причиной даст ocr.read_image
+    except Exception:  # noqa: BLE001 — любой отказ Pillow значит «не картинка»
+        return False
+    return True
 
 
 def _decode_text(data: bytes) -> str:
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            raise _FileError(FileStatus.BROKEN, "текст в UTF-16 повреждён") from None
     for enc in ("utf-8-sig", "cp1251"):
         try:
             text = data.decode(enc)
@@ -135,7 +197,10 @@ def _decode_text(data: bytes) -> str:
 
 def _read_docx(name: str, data: bytes) -> Document:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        if "word/document.xml" not in z.namelist():
+        names = z.namelist()
+        if "word/document.xml" not in names:
+            if "mimetype" in names and "content.xml" in names:
+                return _read_odt(name, z)
             raise _FileError(FileStatus.UNSUPPORTED, "zip-архив, но не документ Word")
         check_zip(z)
     d = docx.Document(io.BytesIO(data))
@@ -230,6 +295,53 @@ def _paragraph_text(p: etree._Element) -> str:
     return "".join(parts)
 
 
+# --- odt, html ---
+
+
+def _read_odt(name: str, z: zipfile.ZipFile) -> Document:
+    check_zip(z)
+    if z.read("mimetype")[:100].decode("ascii", "replace").strip() != _ODT_TEXT:
+        raise _FileError(FileStatus.UNSUPPORTED, "документ OpenDocument, но не текстовый (.odt)")
+    parser = etree.XMLParser(resolve_entities=False, no_network=True)
+    root = etree.fromstring(z.read("content.xml"), parser)
+    paras = [
+        _odt_text(el)
+        for el in root.iter(_ODF_T + "p", _ODF_T + "h")
+        if not any(a.tag in (_ODF_T + "p", _ODF_T + "h") for a in el.iterancestors())
+    ]
+    return Document(name=name, lines=to_lines(paras))
+
+
+def _odt_text(el: etree._Element) -> str:
+    """Текст абзаца ODF: <text:s/> — пробелы, <text:tab/> — пробел, <text:line-break/> — строка."""
+    parts = [el.text or ""]
+    for child in el:
+        tag = child.tag
+        if tag == _ODF_T + "s":
+            parts.append(" ")  # подряд идущие пробелы всё равно схлопнет нормализация
+        elif tag == _ODF_T + "tab":
+            parts.append(" ")
+        elif tag == _ODF_T + "line-break":
+            parts.append("\n")
+        elif tag not in (_ODF_T + "note", _ODF_T + "annotation"):
+            parts.append(_odt_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def _read_html(name: str, text: str) -> Document:
+    text = re.sub(r"^\s*<\?xml[^>]*>", "", text)  # lxml не принимает str с объявлением кодировки
+    root = lxml.html.document_fromstring(text)
+    for el in list(root.iter("script", "style", "noscript", "template", "head")):
+        el.drop_tree()
+    for el in root.iter(*_HTML_BLOCKS):
+        el.tail = "\n" + (el.tail or "")
+        if el.tag == "br":
+            continue
+        el.text = "\n" + (el.text or "")
+    return load_text(name, root.text_content())
+
+
 # --- pdf, rtf, doc ---
 
 
@@ -251,11 +363,18 @@ def _read_pdf(name: str, data: bytes) -> Document:
     for page in reader.pages:
         if time.monotonic() > deadline:
             raise _FileError(FileStatus.TOO_LARGE, "PDF читается слишком долго")
-        pages.append(page.extract_text() or "")
-    lines = to_lines(pages)
-    if not lines:
-        return ocr.read_pdf(name, data)
-    return Document(name=name, lines=lines)
+        text = page.extract_text() or ""
+        pages.append(text if _readable(text) else "")
+    if all(pages):
+        return Document(name=name, lines=to_lines(pages))
+    return ocr.read_pdf(name, data, pages)  # страницы без читаемого текста — в OCR
+
+
+def _readable(text: str) -> bool:
+    """Текстовый слой читаем: достаточно букв, и они — большая часть непробельных символов."""
+    letters = len(_LETTER.findall(text))
+    visible = len("".join(text.split()))
+    return letters >= MIN_PAGE_LETTERS and letters >= MIN_LETTER_SHARE * visible
 
 
 def _read_rtf(name: str, data: bytes) -> Document:

@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 
 from rvm.ingest.limits import MAX_OCR_PAGES, MAX_PIXELS, OCR_PAGE_SECONDS, OCR_TOTAL_SECONDS
 from rvm.ingest.normalize import to_lines
@@ -19,6 +20,8 @@ MIN_CONFIDENCE = 60.0
 NO_TEXT_LAYER = "no_text_layer"
 LOW_QUALITY = "скан плохого качества, проверьте вручную"
 SLOW = "скан распознаётся слишком долго"
+
+register_heif_opener()  # фото с iPhone (HEIC) открываются как обычные картинки
 
 
 def ocr_ready() -> str | None:
@@ -50,24 +53,47 @@ def read_image(name: str, data: bytes) -> Document:
             name, FileStatus.TOO_LARGE, f"картинка больше {MAX_PIXELS // 10**6} мегапикселей"
         )
     img.load()  # битая картинка падает здесь, до проверки Tesseract
-    return _recognize(name, [ImageOps.exif_transpose(img)])
+    reason = ocr_ready()
+    if reason is not None:
+        return Document(
+            name=name, lines=[], status=FileStatus.EMPTY, warnings=[NO_TEXT_LAYER, reason]
+        )
+    return _recognize(name, [_on_white(ImageOps.exif_transpose(img))])
 
 
-def read_pdf(name: str, data: bytes) -> Document:
+def _on_white(img: Image.Image) -> Image.Image:
+    """Прозрачный фон (WEBP, PNG, GIF) → белый: иначе чёрный текст пропадёт на чёрном."""
+    if img.mode in ("1", "L", "RGB"):
+        return img
+    rgba = img.convert("RGBA")
+    white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    return Image.alpha_composite(white, rgba).convert("RGB")
+
+
+def read_pdf(name: str, data: bytes, texts: list[str] | None = None) -> Document:
+    """Скан PDF. texts — текст страниц из текстового слоя; пустые страницы распознаём."""
     pdf = pdfium.PdfDocument(data)
     try:
-        if len(pdf) > MAX_OCR_PAGES:
+        texts = texts or [""] * len(pdf)
+        todo = [i for i, t in enumerate(texts) if not t]
+        if len(todo) > MAX_OCR_PAGES:
             return _refuse(
                 name, FileStatus.TOO_LARGE, f"скан больше {MAX_OCR_PAGES} страниц, не распознаём"
             )
-        return _recognize(name, _render(pdf))
+        reason = ocr_ready()
+        if reason is not None:
+            lines = to_lines(texts)
+            status = FileStatus.OK if lines else FileStatus.EMPTY
+            return Document(name=name, lines=lines, status=status, warnings=[NO_TEXT_LAYER, reason])
+        scans = _render(pdf, todo)
+        return _recognize(name, (t or next(scans) for t in texts))
     finally:
         pdf.close()
 
 
-def _render(pdf: pdfium.PdfDocument) -> Iterator[Image.Image]:
+def _render(pdf: pdfium.PdfDocument, indices: list[int] | None = None) -> Iterator[Image.Image]:
     """Страницы по одной: 300 dpi на всю книгу в память не кладём; огромную страницу уменьшаем."""
-    for i in range(len(pdf)):
+    for i in range(len(pdf)) if indices is None else indices:
         page = pdf[i]
         try:
             w, h = page.get_size()  # в пунктах
@@ -78,16 +104,17 @@ def _render(pdf: pdfium.PdfDocument) -> Iterator[Image.Image]:
         yield img
 
 
-def _recognize(name: str, pages: Iterable[Image.Image]) -> Document:
-    reason = ocr_ready()
-    if reason is not None:
-        return Document(
-            name=name, lines=[], status=FileStatus.EMPTY, warnings=[NO_TEXT_LAYER, reason]
-        )
+def _recognize(name: str, pages: Iterable[Image.Image | str]) -> Document:
+    """Картинки распознаём, строки (текстовые страницы PDF) берём как есть, порядок сохраняем."""
     texts: list[str] = []
+    from_scan: list[bool] = []
     confs: list[float] = []
     deadline = time.monotonic() + OCR_TOTAL_SECONDS
     for page in pages:
+        if isinstance(page, str):
+            texts.append(page)
+            from_scan.append(False)
+            continue
         timeout = min(OCR_PAGE_SECONDS, deadline - time.monotonic())
         try:
             if timeout <= 0:
@@ -97,13 +124,18 @@ def _recognize(name: str, pages: Iterable[Image.Image]) -> Document:
             if "timeout" not in str(e):
                 raise
             return _refuse(name, FileStatus.TOO_LARGE, SLOW)
-        texts += page_lines
+        texts.append("\n".join(page_lines))
+        from_scan.append(True)
         confs += page_confs
     lines = to_lines(texts)
     if not lines:
         return Document(name=name, lines=[], status=FileStatus.EMPTY, warnings=[NO_TEXT_LAYER])
-    for ln in lines:
-        ln.ocr = True
+    # Строки страницы считаем той же нормализацией: так флаг ocr ложится на свои строки.
+    flags = [scan for text, scan in zip(texts, from_scan) for _ in to_lines([text])]
+    for ln, scan in zip(lines, flags, strict=True):
+        ln.ocr = scan
+    if not confs:
+        return Document(name=name, lines=lines)
     conf = sum(confs) / len(confs)
     warnings = [f"текст распознан со скана, уверенность {conf:.0f}%"]
     status = FileStatus.OK
