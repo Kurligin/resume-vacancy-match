@@ -95,3 +95,35 @@ def test_yandex_header(tmp_path: Path) -> None:
         MSGS, Answer, "v1"
     )
     assert fake.calls[0]["extra_headers"] == {"x-data-logging-enabled": "false"}
+
+
+def test_cache_from_many_threads(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    llm = make(tmp_path, FakeOpenAI([f'{{"value": {i}}}' for i in range(8)]))
+
+    def ask(i: int) -> Answer:
+        return llm.complete([{"role": "user", "content": str(i)}], Answer, "v1")
+
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(ask, range(8)))
+    assert sorted(r.value for r in results) == list(range(8))
+    assert [ask(i) for i in range(8)] == results  # теперь из кэша, фейк пуст
+
+
+def test_cache_ttl_and_purge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+    import time
+
+    monkeypatch.setenv("RVM_CACHE_TTL_DAYS", "30")
+    llm = make(tmp_path, FakeOpenAI(['{"value": 1}', '{"value": 2}']))
+    assert llm.complete(MSGS, Answer, "v1").value == 1
+    old = time.time() - 31 * 86400
+    with sqlite3.connect(tmp_path / "cache.sqlite") as db:
+        db.execute("UPDATE cache SET created = ?", (old,))
+    assert llm.complete(MSGS, Answer, "v1").value == 2  # старая запись не отдаётся
+    with sqlite3.connect(tmp_path / "cache.sqlite") as db:
+        db.execute("UPDATE cache SET created = ?", (old,))
+    assert llm.purge_expired() == 1
+    with sqlite3.connect(tmp_path / "cache.sqlite") as db:
+        assert db.execute("SELECT count(*) FROM cache").fetchone()[0] == 0

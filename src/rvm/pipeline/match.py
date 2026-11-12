@@ -3,7 +3,7 @@
 import re
 from collections.abc import Callable
 from datetime import date
-from pathlib import Path
+from importlib.resources import files
 
 from pydantic import BaseModel
 
@@ -15,7 +15,7 @@ from rvm.pipeline.verify import check, normalize
 from rvm.refs.skills import hints, mentioned
 
 PROMPT_VERSION = "match.v1"
-PROMPT = Path(__file__).resolve().parents[3] / "prompts" / f"{PROMPT_VERSION}.md"
+PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 SELF_BLOCKS = {"Обо мне"}
 # признаки отрицания: «нет» модели без них — не «нет»
 NEGATION = re.compile(
