@@ -154,7 +154,13 @@ def analyze_only(args: argparse.Namespace) -> int:
     from rvm.pipeline.analyze import analyze
 
     data = Path(args.data).expanduser()
-    files = sorted(p for p in data.iterdir() if p.is_file() and p.suffix != ".sqlite")
+    files = sorted(
+        p
+        for p in data.iterdir()
+        if p.is_file()
+        and p.suffix.lower() not in {".sqlite", ".jsonl", ".json", ".md"}
+        and ".sqlite" not in p.name
+    )
     vac = {p.stem: load_path(p) for p in files if "ваканс" in p.name.lower()}
     today = date.fromisoformat(args.today) if args.today else date.today()
     llm = LLMClient()

@@ -59,7 +59,13 @@ def seed(db: Path, demo: Path, cache: Path) -> bool:
     store.init(db)
     if store.list_vacancies(db):
         return False
-    files = sorted(p for p in demo.iterdir() if p.is_file() and p.suffix != ".sqlite")
+    files = sorted(
+        p
+        for p in demo.iterdir()
+        if p.is_file()
+        and p.suffix.lower() not in {".sqlite", ".jsonl", ".json", ".md"}
+        and ".sqlite" not in p.name
+    )
     vacancies = [p for p in files if "ваканс" in p.name.lower()]
     resumes = [p for p in files if p not in vacancies]
     # отдельный кэш: ответы фейковой модели не должны попасть в рабочий

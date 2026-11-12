@@ -235,10 +235,12 @@ def _pair_spans(text: str, head: bool) -> list[tuple[int, int]]:
 def _filename_words(filename: str) -> list[str]:
     """ФИО из имени файла: кириллица с заглавной, которую словарь знает как имя или не знает
     вовсе, и любая латиница, кроме _NOT_NAMES. Навыки справочника не берём: «Python»."""
-    # латиницу режем и по смене регистра: «IvanovPetr» → Ivanov, Petr
-    words = re.findall(
-        r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?|[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]{2,}", Path(filename).stem
-    )
+    stem = Path(filename).stem
+    words = re.findall(r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?", stem)
+    # латиница: целое слово и его части по смене регистра («IvanovPetr», «McDonald», «Li»)
+    for tok in re.findall(r"[A-Za-z]{2,}", stem):
+        parts = re.findall(r"[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]+", tok)
+        words += [tok, *(w for w in parts if len(w) >= 2 and w != tok)]
     out = []
     for w in words:
         if _LATIN.fullmatch(w):

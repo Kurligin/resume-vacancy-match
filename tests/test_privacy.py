@@ -473,6 +473,16 @@ def test_camel_case_filename_split() -> None:
     assert_clean(m)
 
 
+@pytest.mark.parametrize(
+    ("fname", "line"), [("Li Wei.pdf", "Li Wei"), ("McDonald John.pdf", "McDonald John")]
+)
+def test_short_and_compound_latin_names(fname: str, line: str) -> None:
+    m = mask(doc_of(line, "Опыт: Python"), fname)
+    for w in line.split():
+        assert w.lower() not in text_of(m.doc).lower()
+    assert_clean(m)
+
+
 def test_latin_filename_stop_words_kept() -> None:
     line = "Senior Python Developer, CV, Backend, QA"
     m = mask(doc_of(line, "Опыт 5 лет"), "Резюме Senior Python Developer CV Final.pdf")
