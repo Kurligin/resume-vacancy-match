@@ -1,12 +1,15 @@
 """Распознавание сканов и фото: Tesseract rus+eng, уверенность по словам."""
 
 import io
+import math
+import time
 from collections.abc import Iterable, Iterator
 
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image, ImageOps
 
+from rvm.ingest.limits import MAX_OCR_PAGES, MAX_PIXELS, OCR_PAGE_SECONDS, OCR_TOTAL_SECONDS
 from rvm.ingest.normalize import to_lines
 from rvm.models import Document, FileStatus
 
@@ -15,6 +18,7 @@ DPI = 300
 MIN_CONFIDENCE = 60.0
 NO_TEXT_LAYER = "no_text_layer"
 LOW_QUALITY = "скан плохого качества, проверьте вручную"
+SLOW = "скан распознаётся слишком долго"
 
 
 def ocr_ready() -> str | None:
@@ -32,21 +36,46 @@ def ocr_ready() -> str | None:
     return None
 
 
+def _refuse(name: str, status: FileStatus, message: str) -> Document:
+    return Document(name=name, lines=[], status=status, warnings=[message])
+
+
 def read_image(name: str, data: bytes) -> Document:
-    img = Image.open(io.BytesIO(data))
+    try:
+        img = Image.open(io.BytesIO(data))  # читает только заголовок
+    except Image.DecompressionBombError:
+        return _refuse(name, FileStatus.BROKEN, "картинка на сотни мегапикселей, похоже на бомбу")
+    if img.width * img.height > MAX_PIXELS:
+        return _refuse(
+            name, FileStatus.TOO_LARGE, f"картинка больше {MAX_PIXELS // 10**6} мегапикселей"
+        )
     img.load()  # битая картинка падает здесь, до проверки Tesseract
     return _recognize(name, [ImageOps.exif_transpose(img)])
 
 
 def read_pdf(name: str, data: bytes) -> Document:
     pdf = pdfium.PdfDocument(data)
-    return _recognize(name, _render(pdf))
+    try:
+        if len(pdf) > MAX_OCR_PAGES:
+            return _refuse(
+                name, FileStatus.TOO_LARGE, f"скан больше {MAX_OCR_PAGES} страниц, не распознаём"
+            )
+        return _recognize(name, _render(pdf))
+    finally:
+        pdf.close()
 
 
 def _render(pdf: pdfium.PdfDocument) -> Iterator[Image.Image]:
-    """Страницы по одной: 300 dpi на всю книгу в память не кладём."""
+    """Страницы по одной: 300 dpi на всю книгу в память не кладём; огромную страницу уменьшаем."""
     for i in range(len(pdf)):
-        yield pdf[i].render(scale=DPI / 72).to_pil()
+        page = pdf[i]
+        try:
+            w, h = page.get_size()  # в пунктах
+            scale = min(DPI / 72, math.sqrt(MAX_PIXELS / max(w * h, 1)) * 0.99)
+            img = page.render(scale=scale).to_pil()
+        finally:
+            page.close()
+        yield img
 
 
 def _recognize(name: str, pages: Iterable[Image.Image]) -> Document:
@@ -57,8 +86,17 @@ def _recognize(name: str, pages: Iterable[Image.Image]) -> Document:
         )
     texts: list[str] = []
     confs: list[float] = []
+    deadline = time.monotonic() + OCR_TOTAL_SECONDS
     for page in pages:
-        page_lines, page_confs = _page_lines(page)
+        timeout = min(OCR_PAGE_SECONDS, deadline - time.monotonic())
+        try:
+            if timeout <= 0:
+                return _refuse(name, FileStatus.TOO_LARGE, SLOW)
+            page_lines, page_confs = _page_lines(page, timeout)
+        except RuntimeError as e:  # pytesseract сообщает о timeout только текстом RuntimeError
+            if "timeout" not in str(e):
+                raise
+            return _refuse(name, FileStatus.TOO_LARGE, SLOW)
         texts += page_lines
         confs += page_confs
     lines = to_lines(texts)
@@ -75,9 +113,11 @@ def _recognize(name: str, pages: Iterable[Image.Image]) -> Document:
     return Document(name=name, lines=lines, status=status, warnings=warnings)
 
 
-def _page_lines(img: Image.Image) -> tuple[list[str], list[float]]:
+def _page_lines(img: Image.Image, timeout: float) -> tuple[list[str], list[float]]:
     """Слова Tesseract → строки страницы по порядку и уверенности слов."""
-    data = pytesseract.image_to_data(img, lang=LANGS, output_type=pytesseract.Output.DICT)
+    data = pytesseract.image_to_data(
+        img, lang=LANGS, output_type=pytesseract.Output.DICT, timeout=timeout
+    )
     rows: dict[tuple[int, int, int], list[str]] = {}
     confs: list[float] = []
     for i, word in enumerate(data["text"]):

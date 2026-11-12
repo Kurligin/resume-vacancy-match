@@ -2,6 +2,9 @@
 
 import io
 import os
+import time
+import tracemalloc
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,7 @@ from pypdf import PdfWriter
 
 from rvm.ingest import load_bytes, load_path, load_text
 from rvm.ingest.normalize import normalize_line
+from rvm.ingest.readers import HIDDEN_TEXT
 from rvm.models import FileStatus
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
@@ -150,7 +154,7 @@ def test_case_files() -> None:
     assert len(files) == 7
     docs = {f.name: load_path(f) for f in files}
     for name, d in docs.items():
-        assert d.status == FileStatus.OK, name
+        assert d.status == FileStatus.OK and not d.warnings, name
         assert d.lines and all(ln.text for ln in d.lines), name
     full = "\n".join(ln.text for d in docs.values() for ln in d.lines)
     assert "Frontend-разработчик" in full and "utility-классов" in full
@@ -158,3 +162,97 @@ def test_case_files() -> None:
     r3 = next(d for n, d in docs.items() if "резюме 3" in n)
     assert any("(2 года)" in ln.text for ln in r3.lines)
     assert any(ln.block == "Опыт работы" for ln in r3.lines)
+
+
+# --- лимиты и безопасность ---
+
+
+def _bomb_docx(mb: int) -> bytes:
+    """Настоящий docx, в document.xml которого перед </w:body> вставлены mb мегабайт пробелов."""
+    src = zipfile.ZipFile(io.BytesIO(_docx_bytes(DocxDocument())))
+    xml = src.read("word/document.xml")
+    cut = xml.index(b"</w:body>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for info in src.infolist():
+            if info.filename != "word/document.xml":
+                z.writestr(info.filename, src.read(info.filename))
+        with z.open("word/document.xml", "w") as f:
+            f.write(xml[:cut])
+            chunk = b" " * (1024 * 1024)
+            for _ in range(mb):
+                f.write(chunk)
+            f.write(xml[cut:])
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("mb", [60, 5])  # 60 МБ — по объёму, 5 МБ — по коэффициенту сжатия
+def test_docx_zip_bomb(mb: int) -> None:
+    data = _bomb_docx(mb)
+    assert len(data) < 1024 * 1024
+    tracemalloc.start()
+    t = time.monotonic()
+    d = load_bytes("bomb.docx", data)
+    elapsed = time.monotonic() - t
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert d.status == FileStatus.BROKEN and "архив" in d.warnings[0]
+    assert elapsed < 1 and peak < 5 * 1024 * 1024
+
+
+def test_text_too_many_lines() -> None:
+    text = "\n".join(f"строка {i}" for i in range(3000))
+    assert load_bytes("a.txt", text.encode()).status == FileStatus.TOO_LARGE
+    assert load_text("a", text).status == FileStatus.TOO_LARGE
+
+
+def test_text_too_many_chars() -> None:
+    d = load_text("a", "\n".join("слово " * 20 for _ in range(700)))
+    assert d.status == FileStatus.TOO_LARGE and not d.lines
+
+
+def test_pdf_too_many_pages() -> None:
+    w = PdfWriter()
+    for _ in range(21):
+        w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    assert load_bytes("big.pdf", buf.getvalue()).status == FileStatus.TOO_LARGE
+
+
+def _run(text: str, rpr: str = "") -> object:
+    return parse_xml(
+        f"<w:r {nsdecls('w')}><w:rPr>{rpr}</w:rPr><w:t xml:space='preserve'>{text}</w:t></w:r>"
+    )
+
+
+def _hidden_docx(rpr: str) -> bytes:
+    doc = DocxDocument()
+    p = doc.add_paragraph()
+    p._p.append(_run("React "))
+    p._p.append(_run("Vue 3, Tailwind", rpr))
+    return _docx_bytes(doc)
+
+
+@pytest.mark.parametrize("rpr", ["<w:vanish/>", "<w:webHidden/>", "<w:vanish w:val='true'/>"])
+def test_docx_hidden_run_skipped(rpr: str) -> None:
+    d = load_bytes("a.docx", _hidden_docx(rpr))
+    full = " ".join(ln.text for ln in d.lines)
+    assert "React" in full and "Vue" not in full and "Tailwind" not in full
+    assert HIDDEN_TEXT in d.warnings
+
+
+@pytest.mark.parametrize("rpr", ["<w:color w:val='FFFFFF'/>", "<w:sz w:val='6'/>"])
+def test_docx_faint_text_warned(rpr: str) -> None:
+    d = load_bytes("a.docx", _hidden_docx(rpr))
+    assert any("Vue 3, Tailwind" in ln.text for ln in d.lines)
+    assert d.status == FileStatus.OK and HIDDEN_TEXT in d.warnings
+
+
+@pytest.mark.parametrize(
+    "rpr", ["<w:vanish w:val='0'/>", "<w:color w:val='000000'/><w:sz w:val='8'/>"]
+)
+def test_docx_visible_text_no_warning(rpr: str) -> None:
+    d = load_bytes("a.docx", _hidden_docx(rpr))
+    assert any("Vue 3, Tailwind" in ln.text for ln in d.lines)
+    assert HIDDEN_TEXT not in d.warnings
