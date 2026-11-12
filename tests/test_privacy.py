@@ -104,6 +104,7 @@ def test_assert_clean_catches_planted_phone() -> None:
 def test_contact_hash_normalized() -> None:
     assert contact_hash("+7 (916) 123-45-67") == contact_hash("89161234567")
     assert contact_hash("A.Ivanov@Mail.RU ") == contact_hash("a.ivanov@mail.ru")
+    assert contact_hash("a.ivanov @ mail.ru") == contact_hash("a.ivanov@mail.ru")
     m1 = mask(doc_of("+7 (916) 123-45-67"))
     m2 = mask(doc_of("тел. 89161234567"))
     assert m1.contact_hashes == m2.contact_hashes == [contact_hash("89161234567")]
@@ -283,7 +284,9 @@ def test_rough_checks_linear_on_long_tokens() -> None:
     assert time.perf_counter() - start < 0.5
 
 
-@pytest.mark.parametrize("line", ["Связь: @ivan_dev", "@IvanDev", "пишите @ivan", "@ivan."])
+@pytest.mark.parametrize(
+    "line", ["Связь: @ivan_dev", "@IvanDev", "пишите @ivan", "@ivan.", "@pythonista", "@python"]
+)
 def test_any_nick_masked_by_default(line: str) -> None:
     m = mask(doc_of(line))
     assert "@" not in m.doc.lines[0].text and "[ник]" in m.doc.lines[0].text
@@ -295,7 +298,8 @@ def test_any_nick_masked_by_default(line: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "line", ["@Override, @Component", "@media", "@font-face, @keyframes", "@NgModule", "@python"]
+    "line",
+    ["@Override, @Component", "@media", "@font-face, @keyframes", "@NgModule", "@angular/core"],
 )
 def test_whitelisted_at_tokens_kept(line: str) -> None:
     m = mask(doc_of(line))
@@ -303,9 +307,36 @@ def test_whitelisted_at_tokens_kept(line: str) -> None:
     assert_clean(m)
 
 
-@pytest.mark.parametrize("planted", ["@override", "user@localhost", "ivan @ "])
+@pytest.mark.parametrize("planted", ["@override", "user@localhost", "@pythonista", "@Python"])
 def test_assert_clean_any_leftover_at(planted: str) -> None:
     m = mask(doc_of("Опыт 5 лет"))
     m.doc.lines[0].text += f" {planted}"
     with pytest.raises(PrivacyError):
         assert_clean(m)
+
+
+@pytest.mark.parametrize("line", ["Сбер @ 2020", "Сбер @", "@ ", "Сбер @  2019 - 2020 @"])
+def test_lone_at_not_leak(line: str) -> None:
+    m = mask(doc_of(line))
+    assert m.doc.lines[0].text == line
+    assert_clean(m)
+
+
+@pytest.mark.parametrize(
+    ("line", "kind"),
+    [
+        ("Пишите @ ivan_dev", "[ник]"),
+        ("@ ivan", "[ник]"),
+        ("Почта ivan @ mail.ru", "[почта]"),
+        ("ivan @ gmail", "[почта]"),
+    ],
+)
+def test_spaced_at_masked_and_caught(line: str, kind: str) -> None:
+    m = mask(doc_of(line))
+    assert "@" not in m.doc.lines[0].text and kind in m.doc.lines[0].text
+    assert "ivan" not in m.doc.lines[0].text
+    assert_clean(m)
+    raw = mask(doc_of("Опыт 5 лет"))
+    raw.doc.lines[0].text = line
+    with pytest.raises(PrivacyError):
+        assert_clean(raw)
