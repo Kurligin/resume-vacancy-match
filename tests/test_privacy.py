@@ -466,6 +466,13 @@ def test_latin_filename_words_closed_by_default() -> None:
         assert_clean(m)
 
 
+def test_camel_case_filename_split() -> None:
+    m = mask(doc_of("Ivanov Petr", "Опыт: Python"), "IvanovPetrCV.pdf")
+    text = text_of(m.doc).lower()
+    assert "ivanov" not in text and "petr" not in text and "Python" in m.doc.lines[1].text
+    assert_clean(m)
+
+
 def test_latin_filename_stop_words_kept() -> None:
     line = "Senior Python Developer, CV, Backend, QA"
     m = mask(doc_of(line, "Опыт 5 лет"), "Резюме Senior Python Developer CV Final.pdf")
