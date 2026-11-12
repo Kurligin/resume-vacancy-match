@@ -335,6 +335,29 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .qa .eff b{color:var(--accent)}
 .qa input{flex:1;min-width:160px;font:inherit;font-size:13px;border:0;border-bottom:1px solid var(--line);padding:5px 2px;outline:0;background:none}
 
+/* Вход */
+.login{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% -10%,#e8f1fc 0%,var(--bg) 60%)}
+.lg{width:min(400px,calc(100vw - 32px));text-align:center}
+.lg .mark{width:56px;height:56px;border-radius:16px;margin:0 auto 14px}
+.lg .mark .i{width:30px;height:30px}
+.lg h1{font-size:28px;letter-spacing:-.02em}
+.lg .tag{color:var(--fg2);margin:4px 0 22px}
+.lgc{padding:18px;text-align:left}
+.lgc .fld{grid-template-columns:70px 1fr}
+.lgc .btn{width:100%;justify-content:center;height:40px;margin-top:14px;font-size:14px}
+.demo-h{font-size:12px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;margin:22px 0 8px;text-align:left}
+.role{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:8px;transition:box-shadow .2s,transform .1s ease-out}
+.role:hover{box-shadow:0 0 0 2px var(--accent)}
+.role:active{transform:scale(.99)}
+.role .avatar{width:40px;height:40px}
+.role .avatar .i{width:20px;height:20px}
+.role small{display:block;color:var(--fg2);font-size:12px}
+.role .go{margin-left:auto;color:var(--accent)}
+.me{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2);margin-left:6px}
+.me .avatar{width:28px;height:28px}
+.me .avatar .i{width:15px;height:15px}
+.me button{color:var(--accent);font-size:13px}
+
 /* Текст резюме */
 .doc{position:sticky;top:80px;max-height:calc(100vh - 104px);overflow:auto;padding:14px 0;align-self:start}
 .doc h2{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--fg2);padding:0 18px 8px}
@@ -396,6 +419,21 @@ mark{background:none;color:inherit}
  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1"/></symbol>
 </svg>
 
+<div class="login" id="login">
+  <div class="lg">
+    <span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>
+    <h1>Сверка</h1>
+    <div class="tag">Подбор вакансий МФТИ по резюме</div>
+    <div class="card lgc">
+      <label class="fld"><span>Логин</span><input autocomplete="username" aria-label="Логин"></label>
+      <label class="fld"><span>Пароль</span><input type="password" autocomplete="current-password" aria-label="Пароль"></label>
+      <button class="btn btn-primary" data-login="recruiter">Войти</button>
+    </div>
+    <div class="demo-h">Демо-доступ — вход в один клик</div>
+    <button class="role" data-login="recruiter"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span><b>Рекрутер</b><small>Анна Смирнова · разбор откликов, кандидаты, вакансии</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
+    <button class="role" data-login="manager"><span class="avatar" style="background:linear-gradient(145deg,#34c759,#1f7a3a)"><svg class="i"><use href="#i-brief"/></svg></span><span><b>Нанимающий руководитель</b><small>Олег Волков · кандидаты, которых прислал рекрутер</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
+  </div>
+</div>
 <header class="bar">
   <span class="logo"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>Сверка</span>
   <nav class="nav" aria-label="Разделы">
@@ -406,6 +444,7 @@ mark{background:none;color:inherit}
   <span class="spacer"></span>
   <span class="mock-tag">макет · цифры условные</span>
   <button class="btn btn-primary" data-upload><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
+  <span class="me"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span id="mename">Анна Смирнова</span><button data-logout>Выйти</button></span>
 </header>
 
 <main class="wrap">
@@ -937,6 +976,8 @@ document.addEventListener('click',e=>{
   if(t.closest('[data-uclose]')||t.id==='upload'){st.upload=null;renderUpload();return;}
   if(t.closest('[data-ugo]')){const r=st.upload==='res'; st.upload=null; renderUpload(); if(r){st.view='base';render();toast('Файлы в очереди — прогресс в «Кандидатах»');} else toast('Добавлено 2 вакансии · сверяем с резервом'); return;}
   if(t.closest('.sheet')&&!t.closest('button')) return;
+  const lg=t.closest('[data-login]'); if(lg){st.role=lg.dataset.login; $('#login').hidden=true; $('#mename').textContent=st.role==='manager'?'Олег Волков':'Анна Смирнова'; if(st.role==='manager'){st.view='base';st.flt='cust';} render(); toast(st.role==='manager'?'Вы вошли как нанимающий руководитель — макет показывает вид рекрутера, отличия описаны в спеке':'Вы вошли как рекрутер'); return;}
+  if(t.closest('[data-logout]')){$('#login').hidden=false; return;}
   const nv=t.closest('[data-nav]'); if(nv){st.view=nv.dataset.nav; if(st.view==='vac'){st.vac='v1';st.cand=bestCand('v1');} st.pair=false; st.from=null; render(); window.scrollTo({top:0}); return;}
   if(t.closest('[data-go]')&&st.go){const g=st.go; $('#toast').remove(); st.go=null; g(); return;}
   if(t.closest('[data-undo]')&&st.undo){st.undo();$('#toast').remove();render();return;}
