@@ -1,6 +1,6 @@
 """Факты резюме: модель размечает строки и сырые даты, даты и длительности разбирает код."""
 
-from pathlib import Path
+from importlib.resources import files
 
 from pydantic import BaseModel
 
@@ -10,7 +10,7 @@ from rvm.llm import LLMClient
 from rvm.models import Document
 
 PROMPT_VERSION = "extract_resume.v1"
-PROMPT = Path(__file__).resolve().parents[3] / "prompts" / f"{PROMPT_VERSION}.md"
+PROMPT = files("rvm") / "prompts" / f"{PROMPT_VERSION}.md"
 
 
 class _Period(BaseModel):

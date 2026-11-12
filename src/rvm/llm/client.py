@@ -1,9 +1,14 @@
-"""LLMClient: один вызов модели → проверенный pydantic-объект. Кэш SQLite, demo-режим, учёт токенов."""
+"""LLMClient: один вызов модели → проверенный pydantic-объект.
+
+Кэш SQLite со сроком жизни, demo-режим, учёт токенов (только счётчики, без текста).
+"""
 
 import hashlib
 import json
 import os
 import sqlite3
+import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +49,15 @@ class LLMClient:
         self.cache_path = Path(cache_path or env.get("RVM_CACHE", "var/cache.sqlite"))
         self.usage_path = self.cache_path.parent / "usage.jsonl"
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self.cache_path)
-        self._db.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)")
+        # в кэше ответы модели по резюме (ПДн) — храним не дольше срока
+        self.ttl = float(env.get("RVM_CACHE_TTL_DAYS", "30")) * 86400
+        self._sql(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT, created REAL)"
+        )
+        try:
+            self._sql("ALTER TABLE cache ADD COLUMN created REAL")  # кэш старой схемы
+        except sqlite3.OperationalError:
+            pass
         self._client = client
         if client is None and self.mode == "live":
             self._client = openai.OpenAI(
@@ -62,9 +74,11 @@ class LLMClient:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        row = self._db.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
-        if row:
-            return schema.model_validate_json(row[0])
+        rows = self._sql(
+            "SELECT value FROM cache WHERE key = ? AND created >= ?", (key, time.time() - self.ttl)
+        )
+        if rows:
+            return schema.model_validate_json(rows[0][0])
         if self.mode == "demo":
             raise DemoCacheMiss(f"нет в кэше: {schema.__name__}, {prompt_version}")
 
@@ -85,12 +99,24 @@ class LLMClient:
                     },
                 ]
                 continue
-            with self._db:
-                self._db.execute(
-                    "INSERT OR REPLACE INTO cache VALUES (?, ?)", (key, result.model_dump_json())
-                )
+            self._sql(
+                "INSERT OR REPLACE INTO cache (key, value, created) VALUES (?, ?, ?)",
+                (key, result.model_dump_json(), time.time()),
+            )
             return result
         raise AssertionError("недостижимо")
+
+    def purge_expired(self) -> int:
+        """Удалить записи кэша старше срока жизни; вернуть их число."""
+        cutoff = time.time() - self.ttl
+        with closing(sqlite3.connect(self.cache_path, timeout=30)) as db, db:
+            cur = db.execute("DELETE FROM cache WHERE created IS NULL OR created < ?", (cutoff,))
+            return cur.rowcount
+
+    def _sql(self, query: str, args: tuple = ()) -> list[Any]:
+        # соединение на вызов: клиент работает из пула потоков веб-сервера
+        with closing(sqlite3.connect(self.cache_path, timeout=30)) as db, db:
+            return db.execute(query, args).fetchall()
 
     def _call(self, messages: Messages, schema: type[BaseModel], json_schema: dict) -> str:
         kwargs: dict[str, Any] = {"model": self.model, "temperature": 0, "seed": 7}
