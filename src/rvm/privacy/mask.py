@@ -28,14 +28,16 @@ _LINK = re.compile(
 _SITE = re.compile(r"(?i)(?<![\w.-])[\w-]+(?:\.[\w-]+)*\.(?:ru|com|рф|me|io|org|net|su)\b(?:/\S*)?")
 # почтовые домены, которые пишут без зоны: «ivan@mail»
 _MAILBOX = r"(?:mail|gmail|yandex|ya|bk|inbox|list|rambler|outlook|hotmail|icloud|yahoo|proton)"
-_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:[\w-]+(?:\.[\w-]+)+|{_MAILBOX}\b)")
+# почта и с пробелами вокруг «@»: «ivan @ mail.ru»
+_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+\s*@\s*(?:[\w-]+(?:\.[\w-]+)+|{_MAILBOX}\b)")
 _PHONE = re.compile(
     r"(?<![\w+])(?:(?:\+\d{1,3}|[78])[\s-]*\(?\d{3}\)?|\(\d{3}\))(?:[\s-]*\d){7}(?!\d)"
 )
 # любой «@токен» — ник, кроме статического белого списка (с учётом регистра): аннотации
 # Java/Angular, CSS-правила, npm-область @angular. Справочник навыков не используем: одна
 # опечатка в нём или подстановка открыла бы ник наружу, и маска с проверкой совпадают
-_NICK = re.compile(r"(?<![\w.+-])@[\w.-]*\w")
+# «@ ivan» (через пробел) — тоже ник; «@ 2020» — нет, это одиночный «@» перед числом
+_NICK = re.compile(r"(?<![\w.+-])@(?:[\w.-]*\w|\s+(?!\d)[\w.-]*\w)")
 _AT_ALLOWED = frozenset(
     [
         "Override",
@@ -100,7 +102,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # Грубые проверки assert_clean, независимые от маски: цепочка цифр с разделителями, почта, домены
 _DIGIT_RUN = re.compile(r"\d(?:[ ().-]{0,2}\d)*")
 _ROUGH_EMAIL = re.compile(rf"(?<![\w.+-])[\w.+-]+@(?:\w[\w-]*\.\w{{2,}}|{_MAILBOX}\b)")
-_AT_BEFORE_TOKEN = re.compile(r"@(?!\s|$)")
+_AT_LEAK = re.compile(r"@(?!\s*(?:\d|$))")
 _DOMAIN = re.compile(r"(?i)(?<!\w)\w+\.(?:ru|com|рф|me|io|org|net|su)\b")
 _MIN_KEY = 16
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)?")
@@ -217,7 +219,9 @@ def _mask_line(text: str, known: list[set[str]]) -> tuple[str, list[tuple[str, s
 def contact_hash(value: str) -> str:
     """HMAC-SHA256 нормализованного телефона или почты с ключом RVM_HASH_SALT (склейка дублей)."""
     value = value.strip().lower()
-    if "@" not in value:
+    if "@" in value:
+        value = re.sub(r"\s+", "", value)
+    else:
         digits = re.sub(r"\D", "", value)
         if len(digits) == 11 and digits[0] in "78":
             digits = digits[1:]
@@ -273,10 +277,10 @@ def _rough_hits(text: str) -> list[str]:
         if sum(c.isdigit() for c in m.group()) >= 7 and not _is_date_or_sum(m.group()):
             hits.append("цифры")
     hits += ["почта"] * len(_ROUGH_EMAIL.findall(text))
-    # любой «@» перед токеном, кроме белого списка и масок, — утечка (без опоры на детектор
-    # ника); одиночный «@» перед пробелом или в конце («Сбер @ 2020») — не утечка
+    # любой «@», кроме белого списка и масок, — утечка (без опоры на детектор ника);
+    # одиночный «@» перед числом или в конце строки («Сбер @ 2020») — не утечка
     rest = _NICK.sub(lambda m: "" if _at_allowed(m.group()) else m.group(), _MASK.sub("", text))
-    hits += ["@"] * len(_AT_BEFORE_TOKEN.findall(rest))
+    hits += ["@"] * len(_AT_LEAK.findall(rest))
     hits += ["домен" for m in _DOMAIN.finditer(text) if not _is_skill(text, m)]
     return hits
 
