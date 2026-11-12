@@ -10,6 +10,8 @@ services:
         required: false
     environment:
       RVM_DEMO_LOGIN: ${RVM_DEMO_LOGIN:-1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen/qwen3.6-35b-a3b}
       RVM_SEED: ${RVM_SEED:-1}
     volumes:
       - rvm-var:/app/var

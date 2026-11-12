@@ -142,6 +142,32 @@ def render(m: dict[str, Any], gold: dict[str, Any], vac_names: dict[str, str]) -
     return "\n".join(out) + "\n"
 
 
+def analyze_only(args: argparse.Namespace) -> int:
+    """Разобрать все резюме папки по всем вакансиям папки — ответы модели оседают в кэше."""
+    load_env(Path(args.env).expanduser())
+    if args.cache:
+        os.environ["RVM_CACHE"] = str(Path(args.cache).expanduser())
+    os.environ.setdefault("RVM_HASH_SALT", secrets.token_hex(16))
+    os.environ["LLM_MODEL"] = args.model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+    from rvm.ingest import load_path
+    from rvm.llm.client import LLMClient
+    from rvm.pipeline.analyze import analyze
+
+    data = Path(args.data).expanduser()
+    files = sorted(p for p in data.iterdir() if p.is_file() and p.suffix != ".sqlite")
+    vac = {p.stem: load_path(p) for p in files if "ваканс" in p.name.lower()}
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    llm = LLMClient()
+    for p in files:
+        if p.stem in vac:
+            continue
+        rep = analyze(load_path(p), vac, llm, today, source_name=p.name)
+        print(f"{p.name}: {rep.error or 'готово'} · {rep.elapsed_s:.0f} с")
+        for w in list(dict.fromkeys(rep.warnings))[:2]:
+            print(f"  ! {w[:300]}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Замер качества конвейера по эталону")
     ap.add_argument("--model", default=None, help="id модели, по умолчанию LLM_MODEL или свой")
@@ -150,9 +176,16 @@ def main() -> int:
     ap.add_argument("--today", default=None, help="ГГГГ-ММ-ДД, по умолчанию дата из эталона")
     ap.add_argument("--gold", default=str(HERE / "gold" / "case.yaml"))
     ap.add_argument("--out", default=str(HERE), help="папка для report.md и last.json")
+    ap.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="разобрать все файлы --data без эталона (сборка demo-кэша)",
+    )
     ap.add_argument("--cache", default=None, help="свой файл кэша модели (замер скорости без кэша)")
     args = ap.parse_args()
 
+    if args.analyze_only:
+        return analyze_only(args)
     gold = yaml.safe_load(Path(args.gold).read_text(encoding="utf-8"))
     load_env(Path(args.env).expanduser())
     if args.cache:

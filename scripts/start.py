@@ -21,6 +21,8 @@ from rvm.api import auth, create_app
 from rvm.llm import LLMClient
 from rvm.llm.fake import DemoFake
 
+DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"
+
 log = logging.getLogger("rvm.start")
 KEYS = ("RVM_HASH_SALT", "RVM_SECRET")
 
@@ -63,7 +65,8 @@ def seed(db: Path, demo: Path, cache: Path) -> bool:
     # отдельный кэш: ответы фейковой модели не должны попасть в рабочий
     seed_cache = cache.parent / "seed-cache.sqlite"
     copy_cache(demo, seed_cache)
-    model = os.environ.get("LLM_MODEL") or "demo"
+    # имя модели — ключ demo-кэша: живые ответы лежат под моделью по умолчанию
+    model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
     llm = LLMClient(
         DemoFake(), base_url="https://fake.invalid", model=model, mode="live", cache_path=seed_cache
     )
