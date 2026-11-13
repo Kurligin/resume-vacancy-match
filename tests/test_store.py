@@ -257,6 +257,24 @@ def test_answer_unknown_to_full_recomputes(db: Path) -> None:
     assert ev[0]["vacancy_id"] == "v1"
 
 
+def test_answer_rebuilds_insights(db: Path) -> None:
+    d = doc("Python")
+    a = store.add_resume(db, b"a", d, masked(d, ["h"]))
+    rep = report(d.name, {"v1": {"r1": Status.FULL, "r2": Status.NO}})
+    old = rep.vacancies[0]
+    old.insights = Insights(
+        strengths=[],
+        risks=[Point(text="Не выполнено: навык r2", refs=["r2"])],
+        recommendation=Point(text=f"Отказать: балл {old.score.score}.", refs=["VERDICT"]),
+    )
+    store.save_report(db, a.resume_id, rep)
+    after = store.answer(db, a.resume_id, "v1", "r2", Status.FULL)
+    ins = store.load_report(db, a.resume_id).vacancies[0].insights
+    assert ins is not None and ins.fallback
+    assert ins.risks == [] and {"r1", "r2"} == {x for p in ins.strengths for x in p.refs}
+    assert ins.recommendation.text == f"Пригласить на собеседование: балл {after.score}."
+
+
 def test_answer_on_check_keeps_score(db: Path) -> None:
     d = doc("Python")
     a = store.add_resume(db, b"a", d, masked(d, ["h"]))

@@ -18,8 +18,8 @@ from typing import Any, Literal, NamedTuple
 from pydantic import TypeAdapter
 
 from rvm.models import Document, Line, MatchRow, Status
-from rvm.pipeline.analyze import Report, ResumeView, VacancyResult, title_of
-from rvm.pipeline.explain import SNAPSHOT_ID
+from rvm.pipeline.analyze import Facts, Report, ResumeView, VacancyResult, title_of
+from rvm.pipeline.explain import SNAPSHOT_ID, build_checks, fallback
 from rvm.privacy import Masked
 from rvm.scoring import PairScore, rank_vacancies, score_pair
 
@@ -470,7 +470,12 @@ def answer(
         res.score = score_pair(res.requirements, res.rows)
         res.verdict = res.score.verdict
 
+        old = _analysis(conn, resume_id).get("redirect")
         _rerank(conn, resume_id, results)
+        new = _analysis(conn, resume_id).get("redirect")
+        # переадресация могла появиться или уйти — у вакансии отклика меняется рекомендация
+        moved = {r["from_vacancy"] for r in (old, new) if r} if old != new else set()
+        _reexplain(conn, resume_id, results, {vacancy_id} | moved)
         _event(
             conn,
             "answer" if flag == FROM_CANDIDATE else "edited",
@@ -496,8 +501,7 @@ def _rerank(
     conn: sqlite3.Connection, resume_id: int, results: dict[str, tuple[VacancyResult, Any]]
 ) -> None:
     """Места всех оценок резюме, переадресация и «никуда не подходит» — по текущим баллам."""
-    a = conn.execute("SELECT analysis FROM resumes WHERE id=?", (resume_id,)).fetchone()[0]
-    analysis = json.loads(a)
+    analysis = _analysis(conn, resume_id)
     ranking = rank_vacancies(
         {vid: v.score for vid, (v, _) in results.items()}, analysis.get("applied")
     )
@@ -511,6 +515,31 @@ def _rerank(
         "UPDATE resumes SET analysis=? WHERE id=?",
         (json.dumps(analysis, ensure_ascii=False), resume_id),
     )
+
+
+def _analysis(conn: sqlite3.Connection, resume_id: int) -> dict[str, Any]:
+    a = conn.execute("SELECT analysis FROM resumes WHERE id=?", (resume_id,)).fetchone()[0]
+    return dict(json.loads(a))
+
+
+def _reexplain(
+    conn: sqlite3.Connection,
+    resume_id: int,
+    results: dict[str, tuple[VacancyResult, Any]],
+    ids: set[str],
+) -> None:
+    """«Кратко» после ответа — по правилам из новой таблицы, без модели: балл и вердикт в
+    рекомендации текущие, закрытые строки и прояснённые проверки в риски не попадают."""
+    analysis = _analysis(conn, resume_id)
+    f = analysis.get("facts") and Facts.model_validate(analysis["facts"])
+    checks = build_checks(f.resume, f.discrepancies, f.snapshot_note) if f else []
+    rd = analysis.get("redirect")
+    for vid in ids:
+        v, m = results[vid]
+        to = rd["to_vacancy"] if rd and rd["from_vacancy"] == vid else None
+        left = [c for c in checks if c.id not in v.clarified]
+        v.insights = fallback(v.requirements, v.rows, v.score, left, to and results[to][0].title)
+        _put_eval(conn, resume_id, v, m["model"], m["prompt_versions"])
 
 
 def add_evaluation(db: Path, resume_id: int, report: Report) -> None:
