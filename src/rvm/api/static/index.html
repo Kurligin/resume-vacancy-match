@@ -65,6 +65,7 @@
       <div class="demo-h">Демо-доступ — вход в один клик</div>
       <button class="role" data-login="recruiter"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span><b>Рекрутер</b><small>Анна Смирнова · разбор откликов, кандидаты, вакансии</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
       <button class="role" data-login="manager"><span class="avatar green"><svg class="i"><use href="#i-brief"/></svg></span><span><b>Нанимающий руководитель</b><small>Олег Волков · кандидаты, которых прислал рекрутер</small></span><svg class="i go"><use href="#i-arrow"/></svg></button>
+      <button class="tour-link" type="button" data-tour-go>Как это работает — 2 минуты</button>
     </div>
   </div>
 </div>
@@ -77,6 +78,7 @@
     <a class="navlink" href="#/vacancies" data-sec="vacancies" data-rec><svg class="i"><use href="#i-brief"/></svg>Вакансии</a>
   </nav>
   <span class="spacer"></span>
+  <button class="btn btn-ghost" data-tour-open data-rec aria-label="Как это работает: тур по сценариям"><svg class="i i-sm"><use href="#i-help"/></svg>Тур</button>
   <button class="btn btn-primary" data-upload data-rec><svg class="i i-sm"><use href="#i-upload"/></svg>Загрузить</button>
   <span class="me"><span class="avatar blue"><svg class="i"><use href="#i-user"/></svg></span><span id="mename"></span><button id="logout">Выйти</button></span>
 </header>
@@ -97,5 +99,6 @@
   <aside class="card doc" id="doc" aria-label="Карточка и текст резюме"></aside>
 </main>
 <script type="module" src="/app.js"></script>
+<script type="module" src="/tour.js"></script>
 </body>
 </html>

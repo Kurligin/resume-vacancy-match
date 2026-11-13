@@ -251,6 +251,9 @@ def test_ui_static(api: TestClient) -> None:
     assert js.status_code == 200 and "javascript" in js.headers["content-type"]
     assert css.status_code == 200 and ".wrap" in css.text
     assert "http" not in js.text.replace("/api/", "")  # без CDN: работает без интернета
+    assert 'src="/tour.js"' in page.text
+    tour = api.get("/tour.js")
+    assert tour.status_code == 200 and "http" not in tour.text
 
 
 def test_ui_login_screen(app: FastAPI) -> None:

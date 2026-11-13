@@ -342,9 +342,9 @@ function topCand(vac) {
   const rd = report.redirect;
   if (rd) {
     const s = (vid) => num(report.vacancies.find((v) => v.id === vid)?.score.score);
-    h += `<div class="callout"><span class="ico">${ic("arrow")}</span><div><b>Лучше подходит «${esc(title(rd.to_vacancy))}»: ${s(rd.to_vacancy)} против ${s(rd.from_vacancy)}</b> у вакансии отклика «${esc(title(rd.from_vacancy))}».</div><a class="btn btn-white" href="#/candidates/${id}/vacancy/${encodeURIComponent(rd.to_vacancy)}">Открыть</a></div>`;
+    h += `<div class="callout" data-tour="redirect"><span class="ico">${ic("arrow")}</span><div><b>Лучше подходит «${esc(title(rd.to_vacancy))}»: ${s(rd.to_vacancy)} против ${s(rd.from_vacancy)}</b> у вакансии отклика «${esc(title(rd.from_vacancy))}».</div><a class="btn btn-white" href="#/candidates/${id}/vacancy/${encodeURIComponent(rd.to_vacancy)}">Открыть</a></div>`;
   } else if (report.none_fit) {
-    h += `<div class="callout"><span class="ico">${ic("alert")}</span><div><b>Ни одна открытая вакансия не подходит.</b> Кандидата можно отправить в резерв — он будет сверен с новыми вакансиями.</div></div>`;
+    h += `<div class="callout" data-tour="nonefit"><span class="ico">${ic("alert")}</span><div><b>Ни одна открытая вакансия не подходит.</b> Кандидата можно отправить в резерв — он будет сверен с новыми вакансиями.</div></div>`;
   }
   h += `<div class="card rank" role="listbox" aria-label="Рейтинг вакансий">${report.vacancies
     .map((v, i) => {
