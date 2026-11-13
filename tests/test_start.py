@@ -12,6 +12,9 @@ from rvm import store
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "data" / "demo"
+DOCS = [p for p in DEMO.iterdir() if p.suffix.lower() in {".txt", ".docx", ".pdf"}]
+VACANCIES = [p for p in DOCS if "ваканс" in p.name.lower()]
+RESUMES = [p for p in DOCS if p not in VACANCIES]
 
 
 def _start() -> ModuleType:
@@ -42,10 +45,10 @@ def test_seed_demo_into_empty_db_once(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("RVM_SECRET", "k" * 32)
     db, cache = tmp_path / "rvm.sqlite", tmp_path / "cache.sqlite"
     assert start.seed(db, DEMO, cache)
-    assert len(store.list_vacancies(db)) == 3
-    assert len(store.list_candidates(db)) == 3
+    assert len(store.list_vacancies(db)) == len(VACANCIES)
+    assert len(store.list_candidates(db)) == len(RESUMES)
     assert not start.seed(db, DEMO, cache)  # база не пустая — повторно не грузим
-    assert len(store.list_candidates(db)) == 3
+    assert len(store.list_candidates(db)) == len(RESUMES)
 
 
 def test_demo_cache_copied_fresh(tmp_path: Path) -> None:
