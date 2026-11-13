@@ -169,11 +169,13 @@ def recommend(score: PairScore, redirect_to: str | None) -> Point:
     if redirect_to:
         text = f"Предложить вакансию «{redirect_to}»: по ней соответствие выше."
     elif score.verdict == Verdict.FIT:
-        text = f"Пригласить на собеседование: балл {score.score}."
+        text = f"Пригласить на собеседование: балл {round(score.score)}."
     elif score.verdict == Verdict.PARTIAL:
-        text = f"Уточнить пробелы на собеседовании или оставить в резерве: балл {score.score}."
+        text = (
+            f"Уточнить пробелы на собеседовании или оставить в резерве: балл {round(score.score)}."
+        )
     elif score.verdict == Verdict.NO_FIT:
-        text = f"Отказать или оставить в резерве под другие вакансии: балл {score.score}."
+        text = f"Отказать или оставить в резерве под другие вакансии: балл {round(score.score)}."
     else:
         text = "Недостаточно данных для вывода: в вакансии не найдены требования."
     return Point(text=text, refs=[VERDICT_ID])

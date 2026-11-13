@@ -272,7 +272,7 @@ def test_answer_rebuilds_insights(db: Path) -> None:
     ins = store.load_report(db, a.resume_id).vacancies[0].insights
     assert ins is not None and ins.fallback
     assert ins.risks == [] and {"r1", "r2"} == {x for p in ins.strengths for x in p.refs}
-    assert ins.recommendation.text == f"Пригласить на собеседование: балл {after.score}."
+    assert ins.recommendation.text == f"Пригласить на собеседование: балл {round(after.score)}."
 
 
 def test_answer_on_check_keeps_score(db: Path) -> None:
