@@ -1,0 +1,422 @@
+{
+  "req_found": 29,
+  "req_total": 36,
+  "req_extra": 6,
+  "req_recall": 0.8055555555555556,
+  "section_acc": 1.0,
+  "status_pairs": 116,
+  "status_unmatched": 28,
+  "status_strict": 0.7241379310344828,
+  "status_lenient": 0.9051724137931034,
+  "no_precision": 1.0,
+  "no_recall": 0.2857142857142857,
+  "no_as_unknown": 1,
+  "unknown_as_no": 0,
+  "quotes_verified": 0.972972972972973,
+  "top1": 1.0,
+  "order_exact": 0.75,
+  "redirect_acc": 1.0,
+  "discrepancy_acc": 0.5,
+  "snapshot_acc": 1.0,
+  "confusion": {
+    "full": {
+      "full": 26,
+      "partial": 6,
+      "no": 0,
+      "unknown": 1
+    },
+    "partial": {
+      "full": 7,
+      "partial": 8,
+      "no": 0,
+      "unknown": 6
+    },
+    "no": {
+      "full": 1,
+      "partial": 3,
+      "no": 2,
+      "unknown": 1
+    },
+    "unknown": {
+      "full": 1,
+      "partial": 6,
+      "no": 0,
+      "unknown": 48
+    }
+  },
+  "errors": [
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v1",
+      "requirement": "Опыт работы от 1 года",
+      "expected": "partial",
+      "alt": [
+        "full",
+        "unknown"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v1",
+      "requirement": "Уверенное знание HTML5 и принципов семантической верстки",
+      "expected": "unknown",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v1",
+      "requirement": "Хорошее знание CSS3: Flexbox, Grid, адаптивная верстка, позиционирование, псевдоклассы и анимации",
+      "expected": "unknown",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v1",
+      "requirement": "Аккуратность в коде (читаемость)",
+      "expected": "unknown",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v2",
+      "requirement": "Образование: высшее экономическое",
+      "expected": "no",
+      "alt": [
+        "partial",
+        "unknown"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v3",
+      "requirement": "Высокий уровень ответственности и самоорганизации",
+      "expected": "partial",
+      "alt": [
+        "full"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v3",
+      "requirement": "Готовность к регулярному взаимодействию с образовательными организациями и командой проекта",
+      "expected": "partial",
+      "alt": [
+        "full",
+        "unknown"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v3",
+      "requirement": "Опыт работы делопроизводителем или документоведом",
+      "expected": "partial",
+      "alt": [
+        "unknown"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 1",
+      "vacancy": "v3",
+      "requirement": "Готовность к очному формату работы",
+      "expected": "partial",
+      "alt": [
+        "unknown",
+        "no"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Уверенное знание HTML5 и принципов семантической верстки",
+      "expected": "partial",
+      "alt": [
+        "full"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Хорошее знание CSS3: Flexbox, Grid, адаптивная верстка, позиционирование, псевдоклассы и анимации",
+      "expected": "partial",
+      "alt": [
+        "full"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Навыки самостоятельного тестирования реализованных интерфейсов",
+      "expected": "full",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Аккуратность в коде (читаемость)",
+      "expected": "partial",
+      "alt": [
+        "full",
+        "unknown"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Понимание разницы между SSR и SPA",
+      "expected": "full",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "Опыт работы с Pinia, Nuxt, Monaco Editor",
+      "expected": "partial",
+      "alt": [
+        "full"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v1",
+      "requirement": "В сопроводительном письме указать, где использовался Vue.js, подходит ли офис и сколько займёт дорога",
+      "expected": "partial",
+      "alt": [
+        "full"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v3",
+      "requirement": "Готовность к очному формату работы",
+      "expected": "full",
+      "alt": [
+        "partial",
+        "unknown"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 2",
+      "vacancy": "v3",
+      "requirement": "Работа в Долгопрудном, 5/2, срочный трудовой договор",
+      "expected": "full",
+      "alt": [
+        "partial",
+        "unknown"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v1",
+      "requirement": "Аккуратность в коде (читаемость)",
+      "expected": "full",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v1",
+      "requirement": "Готовность работать в небольшой команде",
+      "expected": "full",
+      "alt": [],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v2",
+      "requirement": "Образование: высшее экономическое",
+      "expected": "no",
+      "alt": [
+        "unknown",
+        "partial"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v2",
+      "requirement": "Внимание к деталям, системность, концентрация при монотонной работе, коммуникабельность, стрессоустойчивость",
+      "expected": "unknown",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v3",
+      "requirement": "Высокий уровень ответственности и самоорганизации",
+      "expected": "unknown",
+      "alt": [
+        "partial"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v3",
+      "requirement": "Готовность к регулярному взаимодействию с образовательными организациями и командой проекта",
+      "expected": "partial",
+      "alt": [
+        "unknown"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 3",
+      "vacancy": "v3",
+      "requirement": "Опыт работы в сфере образования, государственных или муниципальных структурах",
+      "expected": "partial",
+      "alt": [
+        "full",
+        "unknown"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v1",
+      "requirement": "Опыт работы от 1 года",
+      "expected": "unknown",
+      "alt": [
+        "no",
+        "partial"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v1",
+      "requirement": "Аккуратность в коде (читаемость)",
+      "expected": "unknown",
+      "alt": [
+        "no"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v2",
+      "requirement": "Подтверждённый опыт не менее 3 лет: бухгалтер по учёту ОС и ТМЦ, складской учёт, инвентаризация",
+      "expected": "partial",
+      "alt": [
+        "no"
+      ],
+      "got": "unknown"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v2",
+      "requirement": "Оформление документов на перемещение и списание ОС",
+      "expected": "no",
+      "alt": [
+        "partial",
+        "unknown"
+      ],
+      "got": "full"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v2",
+      "requirement": "Ведение учёта ОС: таблица поступления и выдачи, учёт по кабинетам и подразделениям",
+      "expected": "no",
+      "alt": [
+        "partial",
+        "unknown"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v2",
+      "requirement": "Контроль поступления ОС по субсидиям и грантам, перемещение на сч. 12",
+      "expected": "no",
+      "alt": [
+        "unknown"
+      ],
+      "got": "partial"
+    },
+    {
+      "resume": "Резюме 4",
+      "vacancy": "v3",
+      "requirement": "Опыт работы в сфере образования, государственных или муниципальных структурах",
+      "expected": "full",
+      "alt": [],
+      "got": "unknown"
+    }
+  ],
+  "model": "qwen/qwen3.6-35b-a3b",
+  "today": "2026-11-12",
+  "elapsed_s": 77.3,
+  "usage": {
+    "calls": 46,
+    "prompt_tokens": 77293,
+    "completion_tokens": 35530
+  },
+  "rankings": {
+    "Резюме 1": {
+      "order": [
+        "v3",
+        "v2",
+        "v1"
+      ],
+      "redirect": {
+        "from": "v1",
+        "to": "v3"
+      }
+    },
+    "Резюме 4": {
+      "order": [
+        "v2",
+        "v3",
+        "v1"
+      ],
+      "redirect": null
+    },
+    "Резюме 3": {
+      "order": [
+        "v1",
+        "v3",
+        "v2"
+      ],
+      "redirect": null
+    },
+    "Резюме 2": {
+      "order": [
+        "v1",
+        "v3",
+        "v2"
+      ],
+      "redirect": null
+    }
+  }
+}
