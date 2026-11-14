@@ -1,8 +1,9 @@
 import io
 import os
+import sqlite3
 import time
 import zipfile
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from test_analyze import RoutingFake
 import rvm
 from rvm.api import auth, create_app
 from rvm.llm import LLMClient
+from rvm.store.metrics import period_start
 
 DATA_DIR = os.environ.get("RVM_DATA_DIR")
 needs_data = pytest.mark.skipif(not DATA_DIR, reason="нет RVM_DATA_DIR")
@@ -563,7 +565,9 @@ def test_manager_sees_no_recruiter_comments(app: FastAPI, api: TestClient) -> No
     assert any(e["details"].get("comment") == "моё" for e in events)
 
 
-def test_candidates_page_filters_and_vacancy_counters(app: FastAPI, api: TestClient) -> None:
+def test_candidates_page_filters_and_vacancy_counters(
+    tmp_path: Path, app: FastAPI, api: TestClient
+) -> None:
     vid = add_vacancy(api, "Python-разработчик\nТребования: Python")
     files = wait_batch(
         api, upload(api, [(f"{i}.txt", resume(i)) for i in range(1, 6)], applied=vid)
@@ -584,6 +588,15 @@ def test_candidates_page_filters_and_vacancy_counters(app: FastAPI, api: TestCli
     assert [c["id"] for c in one["items"]] == [ids[0]] and one["total"] == 1
     assert api.get("/api/candidates", params={"page": 1, "vacancy": vid}).json()["total"] == 5
     assert api.get("/api/candidates", params={"page": 1, "source": "hh"}).json()["total"] == 0
+    empty = {"page": 1, "vacancy": "", "source": "", "q": "", "verdict": ""}
+    assert api.get("/api/candidates", params=empty).json()["total"] == 5  # пусто — без фильтра
+    assert api.get("/api/candidates", params={"days": 3651}).status_code == 422
+    # days=1 — с локальной полуночи (как «Сводка»), а не «сутки назад»
+    before = (datetime.fromisoformat(period_start(1)) - timedelta(seconds=1)).isoformat()
+    with sqlite3.connect(tmp_path / "rvm.sqlite") as conn:
+        conn.execute("UPDATE candidates SET created_at=? WHERE id=?", (before, ids[1]))
+    assert api.get("/api/candidates", params={"page": 1, "days": 1}).json()["total"] == 4
+    assert api.get("/api/candidates", params={"page": 1, "days": 2}).json()["total"] == 5
 
     with client(app, "manager") as boss:
         page = boss.get("/api/candidates", params={"page": 1, "status": "new"}).json()
@@ -591,4 +604,4 @@ def test_candidates_page_filters_and_vacancy_counters(app: FastAPI, api: TestCli
 
     v = next(x for x in api.get("/api/vacancies").json() if x["id"] == vid)
     assert v["applied"] == 5 and v["waiting"] == 4
-    assert {"fit", "to_customer"} <= v.keys()
+    assert v["to_customer"] == 1  # PATCH без вакансии — по вакансии отклика

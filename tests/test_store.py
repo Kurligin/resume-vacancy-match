@@ -440,6 +440,14 @@ def test_list_filters_page_and_vacancy_counters(db: Path) -> None:
         "fit": 1,
         "to_customer": 0,
     }
+    # к заказчику без вакансии (PATCH, «Разбор» без vacancy_id): последняя смена статуса
+    # с вакансией, иначе — отклик/лучшая вакансия
+    store.set_status(db, c0, store.CandidateStatus.CUST, comment="повтор")
+    store.set_statuses(db, [c2], store.CandidateStatus.CUST)  # отклик v2
+    store.set_statuses(db, [c1], store.CandidateStatus.REVIEW, vacancy_id=v2)
+    store.set_status(db, c1, store.CandidateStatus.CUST)
+    vac = {v["id"]: v["to_customer"] for v in store.list_vacancies(db)}
+    assert vac == {v1: 1, v2: 2}
 
 
 def test_migration_from_v2_adds_indexes(tmp_path: Path) -> None:

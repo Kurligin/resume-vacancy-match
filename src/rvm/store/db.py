@@ -404,6 +404,7 @@ def _candidate_filter(
     """WHERE для списка: c — кандидат, r — его последняя версия резюме."""
     where: list[str] = []
     args: list[Any] = []
+    vacancy, source = vacancy or None, source or None  # пустой параметр — нет фильтра
     if status is not None:
         where.append("c.status=?")
         args.append(str(status))
@@ -736,7 +737,7 @@ def close_vacancy(db: Path, vacancy_id: str, who: str = RECRUITER) -> None:
 def list_vacancies(db: Path) -> list[dict[str, Any]]:
     """Вакансии со счётчиками по последним версиям резюме: applied — откликов, waiting — из них
     не разобрано (new/review), fit — «подходит», to_customer — у заказчика с этой вакансией
-    (вакансия последней смены статуса)."""
+    (последняя смена статуса с вакансией; без неё — отклик или лучшая вакансия)."""
     with _tx(db, write=False) as conn:
         rows = conn.execute(
             "SELECT id, title, source, is_open, created_at FROM vacancies ORDER BY id"
@@ -754,8 +755,12 @@ def list_vacancies(db: Path) -> list[dict[str, Any]]:
                     SELECT e.vacancy_id, 0, 0, 1, 0 FROM last l
                     JOIN evaluations e ON e.resume_id=l.rid WHERE e.verdict='fit'
                     UNION ALL
-                    SELECT ev.vacancy_id, 0, 0, 0, 1 FROM last l JOIN events ev ON ev.id=(
-                        SELECT max(id) FROM events WHERE candidate_id=l.cid AND type='status')
+                    SELECT COALESCE(
+                        (SELECT vacancy_id FROM events WHERE candidate_id=l.cid AND type='status'
+                            AND vacancy_id<>'' ORDER BY id DESC LIMIT 1),
+                        NULLIF(json_extract(r.analysis, '$.applied'), ''),
+                        (SELECT vacancy_id {BEST_EVAL})), 0, 0, 0, 1
+                    FROM last l LEFT JOIN resumes r ON r.id=l.rid
                     WHERE l.status='cust'
                 )
                 SELECT CAST(vid AS TEXT) AS vid, sum(applied) AS applied, sum(waiting) AS waiting,

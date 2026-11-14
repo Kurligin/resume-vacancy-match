@@ -16,7 +16,7 @@ import zipfile
 from collections.abc import AsyncIterator, Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -47,7 +47,7 @@ from rvm.pipeline.analyze import Report, ReportStatus, ResumeView, VacancyResult
 from rvm.privacy import mask
 from rvm.scoring import PairScore, Verdict
 from rvm.sources import Inbox, Item
-from rvm.store import CandidateStatus
+from rvm.store import CandidateStatus, metrics
 
 MAX_BATCH = 300  # файлов в одной пачке
 OPEN_PATHS = {"/api/health", "/api/login", "/api/login-options"}
@@ -669,7 +669,9 @@ def create_app(
             str | None, Query(description="через запятую: fit, partial, no_fit, no_data")
         ] = None,
         source: Annotated[str | None, Query(description="источник карточки")] = None,
-        days: Annotated[int | None, Query(ge=1, description="пришли за последние N дней")] = None,
+        days: Annotated[
+            int | None, Query(ge=1, le=3650, description="пришли за последние N дней")
+        ] = None,
         page: Annotated[bool, Query(description="ответ страницей с total")] = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
@@ -680,7 +682,7 @@ def create_app(
             verdicts = [str(Verdict(v.strip())) for v in verdict.split(",")] if verdict else None
         except ValueError as e:
             raise HTTPException(422, f"неизвестный вердикт: {verdict}") from e
-        since = (now() - timedelta(days=days)).isoformat() if days else None
+        since = metrics.period_start(days) if days else None  # как «Сводка»
         filters: dict[str, Any] = {
             "vacancy": vacancy,
             "verdicts": verdicts,

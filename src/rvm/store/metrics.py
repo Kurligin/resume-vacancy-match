@@ -148,13 +148,21 @@ def _usage(path: Path | None, start: str) -> tuple[int, int, int]:
     return calls, prompt, completion
 
 
+def period_start(days: int, now: datetime | None = None) -> str:
+    """Начало периода в days календарных дней по RVM_TZ, включая сегодня: локальная полночь
+    (days-1) дней назад в UTC isoformat — в базе UTC, строки сравниваются хронологически.
+    Общее для «Сводки» и фильтра списка кандидатов: числа за «сегодня» совпадают."""
+    local = (now or datetime.now(UTC)).astimezone(config.TZ)
+    since = local.date() - timedelta(days=days - 1)
+    return datetime.combine(since, time(), config.TZ).astimezone(UTC).isoformat()
+
+
 def dashboard(db: Path, days: int, usage: Path | None, now: datetime | None = None) -> Dashboard:
     """Цифры «Сводки» за days дней; определения — в docstring модуля."""
     now = (now or datetime.now(UTC)).astimezone(config.TZ)
     tz, today = now.tzinfo, now.date()
     since = today - timedelta(days=days - 1)
-    # в базе UTC в isoformat: строки сравниваются в хронологическом порядке
-    start = datetime.combine(since, time(), tz).astimezone(UTC).isoformat()
+    start = period_start(days, now)
 
     def age(at: str) -> int:
         return (today - datetime.fromisoformat(at).astimezone(tz).date()).days

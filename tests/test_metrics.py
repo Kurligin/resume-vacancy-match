@@ -18,7 +18,7 @@ from rvm.models import Document, Line, Status
 from rvm.pipeline.analyze import ReportStatus
 from rvm.privacy import Masked
 from rvm.store import db as db_mod
-from rvm.store.metrics import dashboard
+from rvm.store.metrics import dashboard, period_start
 
 # фикстуры с демо-сессией из test_api
 _salt, fake, app, api = test_api._salt, test_api.fake, test_api.app, test_api.api
@@ -271,6 +271,10 @@ def test_today_in_rvm_tz(
     late = datetime(2026, 11, 14, 21, 30, tzinfo=UTC)  # по UTC ещё 14.11
     d = dashboard(db, 1, None, late)
     assert d.today.isoformat() == "2026-11-15" and d.by_source == {"почта": 1}
+    assert period_start(1, late) == "2026-11-14T21:00:00+00:00"  # полночь МСК в UTC
+    # список кандидатов за 1 день — то же число, что «Сводка» за сегодня
+    assert store.count_candidates(db, since=period_start(1, late)) == d.applications == 1
+    assert store.count_candidates(db, since=period_start(2, late)) == 2
     monkeypatch.setattr("rvm.scoring.config.TZ", ZoneInfo("UTC"))
     d = dashboard(db, 1, None, late)
     assert d.today.isoformat() == "2026-11-14" and d.by_source == {"файл": 1, "почта": 1}
