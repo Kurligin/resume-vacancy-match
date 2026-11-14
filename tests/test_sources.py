@@ -408,3 +408,16 @@ def test_poll_minutes(tmp_path: Path, inbox: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("RVM_POLL_MINUTES", raw)
     with client(make_app(tmp_path), "recruiter") as api:
         assert source(api, "folder")["every_minutes"] == every
+
+
+def test_folder_refuses_symlinked_done(tmp_path: Path) -> None:
+    import pytest
+
+    from rvm.sources import folder
+
+    root, outside = tmp_path / "inbox", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "done").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(RuntimeError):
+        folder.fetch({"RVM_INBOX_DIR": str(root)}, {}, lambda ref: False)

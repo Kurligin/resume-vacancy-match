@@ -48,6 +48,9 @@ def fetch(
     root = Path(env["RVM_INBOX_DIR"])
     for sub in (DONE, ERROR):
         (root / sub).mkdir(parents=True, exist_ok=True)
+        # перенос идёт в done/ и error/ — ссылка вместо папки увела бы файлы за пределы папки
+        if not stat.S_ISDIR(os.lstat(root / sub).st_mode):
+            raise RuntimeError(f"{sub} в папке входящих — не обычная папка")
     items, skipped, paths = [], [], {}
     used, cap = 0, limits.MAX_REQUEST_BYTES
     for p in sorted(root.iterdir()):
