@@ -190,6 +190,8 @@ class VacancyItem(BaseModel):
     applied: int = 0  # откликов (последние версии резюме)
     waiting: int = 0  # из откликнувшихся не разобрано: new / review
     fit: int = 0  # «подходит» по этой вакансии
+    partial: int = 0  # «частично»
+    rated: int = 0  # оценено — сколько всего в рейтинге вакансии
     to_customer: int = 0  # у заказчика с этой вакансией
 
 
@@ -635,13 +637,17 @@ def create_app(
     @app.get(
         "/api/vacancies/{vacancy_id}/candidates",
         summary="Рейтинг кандидатов по вакансии",
-        description="Оценки последней версии резюме каждого кандидата, лучшие сверху.",
+        description="Оценки последней версии резюме каждого кандидата, лучшие сверху. limit — "
+        "только первые (без него — все); сколько всего — rated в списке вакансий.",
     )
     def vacancy_candidates(
-        vacancy_id: str, user: Recruiter, pii: bool = False
+        vacancy_id: str,
+        user: Recruiter,
+        pii: bool = False,
+        limit: Annotated[int | None, Query(ge=1)] = None,
     ) -> list[VacancyCandidate]:
         try:
-            rows = store.vacancy_candidates(db, vacancy_id)
+            rows = store.vacancy_candidates(db, vacancy_id, limit)
         except KeyError as e:
             raise not_found(e) from e
         extra = flow(user, pii, [r["id"] for r in rows])

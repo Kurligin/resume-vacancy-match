@@ -440,6 +440,12 @@ def test_list_filters_page_and_vacancy_counters(db: Path) -> None:
         "fit": 1,
         "to_customer": 0,
     }
+    assert [(vac[v]["rated"], vac[v]["fit"] + vac[v]["partial"]) for v in (v1, v2)] == [
+        (3, 2),
+        (3, 1),
+    ]
+    assert len(store.vacancy_candidates(db, v1)) == 3
+    assert len(store.vacancy_candidates(db, v1, limit=2)) == 2
     # к заказчику без вакансии (PATCH, «Разбор» без vacancy_id): последняя смена статуса
     # с вакансией, иначе — отклик/лучшая вакансия
     store.set_status(db, c0, store.CandidateStatus.CUST, comment="повтор")

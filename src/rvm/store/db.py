@@ -736,7 +736,8 @@ def close_vacancy(db: Path, vacancy_id: str, who: str = RECRUITER) -> None:
 
 def list_vacancies(db: Path) -> list[dict[str, Any]]:
     """Вакансии со счётчиками по последним версиям резюме: applied — откликов, waiting — из них
-    не разобрано (new/review), fit — «подходит», to_customer — у заказчика с этой вакансией
+    не разобрано (new/review), fit / partial — «подходит» / «частично», rated — оценено (длина
+    рейтинга vacancy_candidates), to_customer — у заказчика с этой вакансией
     (последняя смена статуса с вакансией; без неё — отклик или лучшая вакансия)."""
     with _tx(db, write=False) as conn:
         rows = conn.execute(
@@ -749,22 +750,24 @@ def list_vacancies(db: Path) -> list[dict[str, Any]]:
                     FROM candidates c),
                 x AS (
                     SELECT json_extract(r.analysis, '$.applied') AS vid, 1 AS applied,
-                        l.status IN ('new', 'review') AS waiting, 0 AS fit, 0 AS cust
+                        l.status IN ('new', 'review') AS waiting, 0 AS fit, 0 AS cust,
+                        0 AS partial, 0 AS rated
                     FROM last l JOIN resumes r ON r.id=l.rid
                     UNION ALL
-                    SELECT e.vacancy_id, 0, 0, 1, 0 FROM last l
-                    JOIN evaluations e ON e.resume_id=l.rid WHERE e.verdict='fit'
+                    SELECT e.vacancy_id, 0, 0, e.verdict='fit', 0, e.verdict='partial', 1
+                    FROM last l JOIN evaluations e ON e.resume_id=l.rid
                     UNION ALL
                     SELECT COALESCE(
                         (SELECT vacancy_id FROM events WHERE candidate_id=l.cid AND type='status'
                             AND vacancy_id<>'' ORDER BY id DESC LIMIT 1),
                         NULLIF(json_extract(r.analysis, '$.applied'), ''),
-                        (SELECT vacancy_id {BEST_EVAL})), 0, 0, 0, 1
+                        (SELECT vacancy_id {BEST_EVAL})), 0, 0, 0, 1, 0, 0
                     FROM last l LEFT JOIN resumes r ON r.id=l.rid
                     WHERE l.status='cust'
                 )
                 SELECT CAST(vid AS TEXT) AS vid, sum(applied) AS applied, sum(waiting) AS waiting,
-                    sum(fit) AS fit, sum(cust) AS to_customer
+                    sum(fit) AS fit, sum(cust) AS to_customer, sum(partial) AS partial,
+                    sum(rated) AS rated
                 FROM x WHERE vid IS NOT NULL GROUP BY 1"""
             )
         }
@@ -773,14 +776,17 @@ def list_vacancies(db: Path) -> list[dict[str, Any]]:
         n = counts.get(str(r["id"]), {})
         out.append(
             {**dict(r), "id": str(r["id"]), "is_open": bool(r["is_open"])}
-            | {k: n.get(k, 0) for k in ("applied", "waiting", "fit", "to_customer")}
+            | {
+                k: n.get(k, 0)
+                for k in ("applied", "waiting", "fit", "partial", "rated", "to_customer")
+            }
         )
     return out
 
 
-def vacancy_candidates(db: Path, vacancy_id: str) -> list[dict[str, Any]]:
-    """Оценки по вакансии для последней версии резюме каждого кандидата, лучшие сверху;
-    blockers — тексты невыполненных обязательных требований."""
+def vacancy_candidates(db: Path, vacancy_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+    """Оценки по вакансии для последней версии резюме каждого кандидата, лучшие сверху (limit —
+    только первые); blockers — тексты невыполненных обязательных требований."""
     with _tx(db, write=False) as conn:
         if not conn.execute("SELECT 1 FROM vacancies WHERE id=?", (vacancy_id,)).fetchone():
             raise KeyError(f"нет вакансии {vacancy_id}")
@@ -788,8 +794,8 @@ def vacancy_candidates(db: Path, vacancy_id: str) -> list[dict[str, Any]]:
             "SELECT c.id, c.status, e.resume_id, e.score, e.low, e.high, e.verdict, e.result"
             " FROM candidates c JOIN evaluations e"
             " ON e.resume_id=(SELECT max(id) FROM resumes WHERE candidate_id=c.id)"
-            " WHERE e.vacancy_id=? ORDER BY e.score DESC, c.id",
-            (vacancy_id,),
+            " WHERE e.vacancy_id=? ORDER BY e.score DESC, c.id LIMIT ?",
+            (vacancy_id, -1 if limit is None else limit),
         ).fetchall()
     out = []
     for r in rows:

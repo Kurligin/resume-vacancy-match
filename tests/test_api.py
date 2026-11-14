@@ -209,6 +209,10 @@ def test_vacancy_candidates(app: FastAPI, api: TestClient, fake: SwitchFake) -> 
     assert r["low"] <= r["score"] <= r["high"] and r["verdict"] and r["status"] == "new"
     assert r["resume_id"] == api.get(f"/api/candidates/{r['id']}").json()["versions"][0]["id"]
     assert all(isinstance(b, str) for b in r["blockers"])
+    top = api.get(f"/api/vacancies/{v1}/candidates", params={"limit": 1}).json()
+    assert top == rows[:1]
+    v = next(x for x in api.get("/api/vacancies").json() if x["id"] == v1)
+    assert v["rated"] == len(rows) and v["fit"] + v["partial"] <= v["rated"]
 
     fake.full = True  # вакансия, по которой у кандидатов ещё нет оценок, — пустой рейтинг
     v2 = add_vacancy(api, "Python-аналитик\nТребования: Python")

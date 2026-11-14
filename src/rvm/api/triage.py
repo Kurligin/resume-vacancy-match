@@ -137,7 +137,7 @@ def router(db: Path, batch_ids: Callable[[str], list[int] | None]) -> APIRouter:
     def triage(
         _: Recruiter,
         batch: str | None = None,
-        limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+        limit: Annotated[int | None, Query(ge=1, le=10000)] = None,
     ) -> Triage:
         ids = None
         if batch is not None:

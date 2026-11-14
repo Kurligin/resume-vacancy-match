@@ -47,7 +47,7 @@ const FLAG = {
 };
 const POLL_MS = 1500;
 
-const st = { me: null, bk: "need", ti: 0, packNames: false, pii: false, vq: "", vclosed: false, tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
+const st = { me: null, bk: "need", ti: 0, tlim: 50, packNames: false, pii: false, vq: "", vclosed: false, tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
 let view = {}; // данные текущего экрана
 let poll = null;
 
@@ -308,24 +308,43 @@ function drawPicked() {
 }
 
 // пачкой — тем же /api/triage/decide, что и «Разбор»; вакансия — из фильтра или общая лучшая у выбранных
-async function bulk(a) {
+async function bulk(a, sure = false) {
   if (!a) {
     view.picked.clear();
     return drawPicked();
   }
   const rows = view.base.page.items.filter((c) => view.picked.has(c.id));
+  if (a === 4 && rows.length > 1 && !sure) {
+    const n = rows.length;
+    return modal(
+      "confirm",
+      `<div class="alert" role="alertdialog" aria-label="Подтверждение">
+   <div class="ai" style="background:var(--no-bg);color:var(--no)">${ic("x")}</div>
+   <h3>Отказать ${n} ${plural(n, "кандидату", "кандидатам", "кандидатам")}?</h3>
+   <p>Статус сменится на «Отказ». Отменить можно кнопкой в уведомлении.</p>
+   <div class="row"><button class="btn btn-ghost" data-cancel>Отмена</button><button class="btn btn-red" data-bulkok="4">Отказать</button></div></div>`,
+    );
+  }
   // vacancy_id одна на вызов: без фильтра по вакансии — отдельный вызов на каждую лучшую вакансию (счётчик «заказчику»)
   const groups = new Map();
   for (const c of rows) {
     const vid = route().f?.vacancy || c.best_vacancy || null;
     groups.set(vid, [...(groups.get(vid) ?? []), c.id]);
   }
-  const prev = rows.map((c) => [c.id, c.status]);
+  const saved = new Set();
   try {
-    for (const [vid, ids] of groups) await post("/api/triage/decide", { candidate_ids: ids, decision: a, vacancy_id: vid });
+    for (const [vid, ids] of groups) {
+      await post("/api/triage/decide", { candidate_ids: ids, decision: a, vacancy_id: vid });
+      ids.forEach((id) => saved.add(id));
+    }
   } catch (e) {
-    return toast(`Решение не сохранено: ${e.message}`);
+    if (!saved.size) return toast(`Решение не сохранено: ${e.message}`);
+    // часть вызовов прошла: выбранными остаются несохранённые — их и повторить
+    view.picked = new Set(rows.filter((c) => !saved.has(c.id)).map((c) => c.id));
+    toast(`Сохранено для ${saved.size} из ${rows.length}, остальные — повторите: ${e.message}`);
+    return render();
   }
+  const prev = rows.map((c) => [c.id, c.status]);
   view.picked = new Set();
   const n = rows.length;
   const again = () => render();
@@ -582,7 +601,6 @@ function funnel(d) {
 /* ---------- «Вакансии» ---------- */
 
 const CELL = { fit: "s-full", partial: "s-partial" };
-const isOk = (c) => c.verdict === "fit" || c.verdict === "partial";
 let vacTimer = null;
 
 let vacSeq = 0;
@@ -593,8 +611,8 @@ async function renderVacs(r) {
   try {
     const all = await api("/api/vacancies");
     const vacs = all.filter((v) => v.is_open || st.vclosed);
-    const ranks = await Promise.all(vacs.map((v) => api(`/api/vacancies/${encodeURIComponent(v.id)}/candidates?pii=${st.pii}`)));
-    ranks.forEach((x) => remember(x.slice(0, TOP)));
+    const ranks = await Promise.all(vacs.map((v) => api(`/api/vacancies/${encodeURIComponent(v.id)}/candidates?pii=${st.pii}&limit=${TOP}`)));
+    ranks.forEach(remember);
     if (seq !== vacSeq || route().name !== "vacancies") return;
     view.vl = { all, vacs, ranks };
   } catch (e) {
@@ -655,7 +673,8 @@ function topVacs(i) {
     h += `<div class="callout"><span class="ico">${ic("alert")}</span><div><b>Сверка с резервом не удалась:</b> ${esc(v.reserve_error)}</div></div>`;
   else if (m)
     h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>В резерве ${plural(m, "нашёлся", "нашлись", "нашлись")} ${m} ${plural(m, "подходящий", "подходящих", "подходящих")}.</b> ${v.reserve_matches.map(cname).join(", ")}.</div><a class="btn btn-white" href="#/candidates/${v.reserve_matches[0]}/vacancy/${encodeURIComponent(v.id)}">Показать</a></div>`;
-  // столбцы матрицы — 30 лучших по баллу среди показанных вакансий
+  // столбцы матрицы — 30 лучших по баллу среди показанных вакансий: у каждого лучший балл
+  // попадает в 30 лучших своей вакансии, поэтому хватает рейтингов с limit=30
   const best = new Map();
   for (const c of ranks.flat()) best.set(c.id, Math.max(best.get(c.id) ?? -1, c.score));
   const cols = [...best].sort((a, b) => b[1] - a[1]).slice(0, TOP).map(([id]) => id);
@@ -671,15 +690,16 @@ function topVacs(i) {
          `<button class="hname ${k === i ? "on" : ""}" data-href="#/vacancies/${encodeURIComponent(x.id)}" title="${esc(x.title)}">${ic("brief", "i-sm")}<span class="ht">${esc(x.title)}</span></button>${cols
            .map((id) => {
              const c = ranks[k].find((y) => y.id === id);
+             const cut = x.rated > TOP; // рейтинг вакансии пришёл не целиком
              return c
                ? `<button class="hcell num ${CELL[c.verdict] ?? "s-unknown"}" data-href="#/candidates/${id}/vacancy/${encodeURIComponent(x.id)}" title="${cname(id)} · ${esc(x.title)}">${num(c.score)}</button>`
-               : `<span class="hcell" title="нет оценки" style="color:var(--fg3)">–</span>`;
+               : `<span class="hcell" title="${cut ? `нет оценки или не в ${TOP} лучших по вакансии` : "нет оценки"}" style="color:var(--fg3)">–</span>`;
            })
            .join("")}`,
      )
-     .join("")}</div></div>${best.size > TOP ? `<div class="fmeta" style="margin-top:8px">Показаны ${TOP} лучших по баллу из ${best.size}. ${allOf(v)}</div>` : ""}</div>`;
-  const ok = rows.filter(isOk).length;
-  h += `<div class="card rank" aria-label="Рейтинг кандидатов"><div class="tools rk"><b class="vt"><span>${esc(v.title)}</span></b><span class="fmeta">${rows.length} резюме · ${ok} ${plural(ok, "подходит", "подходят", "подходят")} хотя бы частично</span></div>${
+     .join("")}</div></div>${best.size > TOP ? `<div class="fmeta" style="margin-top:8px">Показаны ${TOP} лучших по баллу. ${allOf(v)}</div>` : ""}</div>`;
+  const ok = v.fit + v.partial;
+  h += `<div class="card rank" aria-label="Рейтинг кандидатов"><div class="tools rk"><b class="vt"><span>${esc(v.title)}</span></b><span class="fmeta">${v.rated} резюме · ${ok} ${plural(ok, "подходит", "подходят", "подходят")} хотя бы частично</span></div>${
     rows.length
       ? rows
           .slice(0, TOP)
@@ -688,7 +708,7 @@ function topVacs(i) {
             return `<button class="rrow" data-href="#/candidates/${c.id}/vacancy/${encodeURIComponent(v.id)}"><span class="tile round ${vv[2]}">${ic("user")}<em class="num">${n + 1}</em></span>
      <span><div class="t">${cname(c.id)}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${PS[c.status][0]}</span>${c.blockers.length ? `<span class="bl">${ic("lock", "i-sm")}${esc(whyShort(c.blockers))}</span>` : ""}</div></span>${scoreCell(c)}<span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></button>`;
           })
-          .join("") + `<div class="pager">${rows.length > TOP ? `<span>Показаны ${TOP} лучших из ${rows.length}</span>` : ""}<span class="spacer"></span>${allOf(v)}</div>`
+          .join("") + `<div class="pager">${v.rated > TOP ? `<span>Показаны ${TOP} лучших из ${v.rated}</span>` : ""}<span class="spacer"></span>${allOf(v)}</div>`
       : `<div class="stub" style="padding:18px">${ic("users")}Оценок по вакансии пока нет: они появятся после загрузки резюме и сверки резерва.</div>`
   }</div>`;
   return h;
@@ -697,15 +717,13 @@ function topVacs(i) {
 function vacCard(i) {
   const v = view.vl.vacs[i];
   if (!v) return `<div class="stub" style="padding:18px">${ic("brief")}Добавьте первую вакансию — её карточка появится здесь.</div>`;
-  const rows = view.vl.ranks[i];
-  const n = (f) => rows.filter(f).length;
   const src = v.source.startsWith("hh:") ? "с hh.ru" : v.source === "файл" ? "из файла" : "из текста";
   const line = (icn, cls, t, x) => `<div class="ev">${ic(icn, cls)}<span>${t}</span><span class="n num">${x}</span></div>`;
   return `<div class="ccard"><div class="ch1"><span class="avatar blue">${ic("brief")}</span><div><h2>${esc(v.title)}</h2><div class="sub" style="margin-top:2px"><span>${ic("cal", "i-sm")}добавлена ${day(v.created_at)} ${src}${v.is_open ? "" : " · закрыта"}</span></div></div></div>
    <div class="sec">Отклики</div>
    ${line("inbox", "", "откликов", v.applied)}${line("bell", "c-part", "ждут разбора", v.waiting)}${line("send", "c-acc", "у заказчика", v.to_customer)}
    <div class="sec">Кандидаты</div>
-   ${line("check", "c-full", "подходят", n((c) => c.verdict === "fit"))}${line("half", "c-part", "частично", n((c) => c.verdict === "partial"))}${line("x", "", "не подходят", n((c) => !isOk(c)))}
+   ${line("check", "c-full", "подходят", v.fit)}${line("half", "c-part", "частично", v.partial)}${line("x", "", "не подходят", v.rated - v.fit - v.partial)}
    <div class="cactions"><a class="btn btn-ghost" href="#/candidates?vacancy=${encodeURIComponent(v.id)}">${ic("users", "i-sm")}Все кандидаты</a>${v.is_open ? `<button class="btn btn-danger" data-vclose="${esc(v.id)}">${ic("x", "i-sm")}Закрыть вакансию</button>` : ""}</div></div>`;
 }
 
@@ -872,12 +890,16 @@ async function answer(i, val) {
 /* ---------- «Разбор» ---------- */
 
 const UNDECIDED = ["new", "review"];
+const TRI_PAGE = 50; // карточек в корзине за раз; «Показать ещё» — следующие
+const triLeft = (t) => t.totals.need + t.totals.fit + t.totals.nofit;
+const moreBtn = (shown, total) =>
+  shown < total ? `<button class="btn btn-ghost" data-tmore style="margin:12px auto;display:flex">Показать ещё (показано ${shown} из ${total})</button>` : "";
 const whyShort = (a) => (a.length > 1 ? `${a[0]} и ещё ${a.length - 1}` : a[0] ?? "");
 
 async function renderTriage() {
   if (!view.tri) $("#top").innerHTML = stateBox("load", "Собираем отклики…");
   try {
-    const [t, list] = await Promise.all([api("/api/triage"), api(`/api/candidates?sort=date&pii=${st.pii}`)]);
+    const [t, list] = await Promise.all([api(`/api/triage?limit=${st.tlim}`), api(`/api/candidates?sort=date&pii=${st.pii}`)]);
     remember(list);
     view.tri = { t, list, prev: Object.fromEntries(list.map((c) => [c.id, c.status])) };
   } catch (e) {
@@ -890,9 +912,9 @@ async function renderTriage() {
 function drawTriage() {
   const { t, list } = view.tri;
   const done = list.filter((c) => !UNDECIDED.includes(c.status));
-  const left = t.need.length + t.fit.length + t.nofit.length;
+  const left = triLeft(t);
   const all = left + done.length + t.pending;
-  const cnt = { need: t.need.length, fit: t.fit.length, nofit: t.nofit.length, done: done.length };
+  const cnt = { ...t.totals, done: done.length };
   $("#trbadge").textContent = left || "";
   let h = `<div class="head"><span class="avatar blue">${ic("inbox")}</span><div class="who"><h1>Разбор откликов</h1>
     <div class="sub"><span>${ic("users", "i-sm")}${all} ${plural(all, "отклик", "отклика", "откликов")}</span><span>${ic("check", "i-sm")}разобрано ${done.length} из ${all}</span>${t.pending ? `<span>${ic("clock", "i-sm")}ещё оцениваются: ${t.pending}</span>` : ""}</div></div>
@@ -900,7 +922,7 @@ function drawTriage() {
    <div><div class="buckets">${Object.keys(BK).map((b) => `<button class="bk" aria-pressed="${st.bk === b}" data-bk="${b}">${BK[b]} <span class="num">${cnt[b]}</span></button>`).join("")}</div>
    <div class="prog"><i style="width:${all ? (done.length / all) * 100 : 0}%"></i></div></div>`;
   view.tc = null;
-  if (st.bk === "need") h += needCard(t.need);
+  if (st.bk === "need") h += needCard(t.need, t.totals.need);
   else if (st.bk === "done")
     h += `<div class="card rank">${
       done
@@ -910,12 +932,12 @@ function drawTriage() {
         )
         .join("") || `<div class="stub" style="padding:16px">${ic("help")}Пока ничего не разобрано. Начните с «Нужно ваше решение».</div>`
     }</div>`;
-  else h += bucketList(t[st.bk], st.bk === "fit");
+  else h += bucketList(t[st.bk], st.bk === "fit", t.totals[st.bk]);
   $("#top").innerHTML = h;
   triageDoc(view.tc?.id);
 }
 
-function needCard(rows) {
+function needCard(rows, total) {
   if (!rows.length)
     return `<div class="card tcard"><div class="stub">${ic("check", "c-full")}Все отклики, где нужно ваше решение, разобраны.<button class="btn btn-ghost" data-bk="fit" style="margin-left:auto">Явно подходят</button><button class="btn btn-ghost" data-bk="nofit">Явно не подходят</button></div></div>`;
   st.ti = Math.max(0, Math.min(st.ti, rows.length - 1));
@@ -926,15 +948,15 @@ function needCard(rows) {
       ? a.map((p) => `<button class="pt"${p.lines.length ? ` data-l="${p.lines[0]}"` : ""}>${ic(icn, c)}<span>${esc(p.text)}${p.lines.length ? `<span class="ref">L${p.lines[0]}</span>` : ""}</span></button>`).join("")
       : `<div class="stub">—</div>`;
   return `<div class="card tcard"><div class="tc-top"><span class="avatar" style="width:44px;height:44px">${ic("user")}</span><div><h2>${cname(r.id)}</h2><div class="sub" style="margin-top:2px">${r.position ? `<span>${ic("brief", "i-sm")}${esc(r.position)}</span>` : ""}</div></div>
-    <div class="tc-nav"><button data-tn="-1" aria-label="Предыдущий">${ic("chev", "i-sm")}</button><span class="num">${st.ti + 1} из ${rows.length}</span><button data-tn="1" aria-label="Следующий" style="transform:scaleX(-1)">${ic("chev", "i-sm")}</button></div></div>
+    <div class="tc-nav"><button data-tn="-1" aria-label="Предыдущий">${ic("chev", "i-sm")}</button><span class="num">${st.ti + 1} из ${total}</span><button data-tn="1" aria-label="Следующий" style="transform:scaleX(-1)">${ic("chev", "i-sm")}</button></div></div>
    <div class="tc-best"><span class="big num">${num(r.score)}</span><span><b>${esc(r.title)}</b><div class="lbl num">лучшая вакансия · вилка ${num(r.low)}–${num(r.high)}</div></span><span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></div>
    <div class="why-here">${ic("flag", "i-sm")}Почему здесь: ${esc(r.why.join("; "))}</div>
    <div class="pc"><div><div class="h3">${ic("spark", "c-full")}За</div>${pts(r.pros, "check", "c-full")}</div><div><div class="h3">${ic("alert", "c-part")}Против</div>${pts(r.cons, "alert", "c-part")}</div></div>
    <div class="decide">${[1, 2, 3, 4].map((i) => `<button class="dbtn ${r.proposed === i ? "sug" : ""}" data-act="${i}"><b>${ic(ACT[i][1], "i-sm")}${ACT[i][0]}<kbd>${i}</kbd></b><small>${r.proposed === i ? "предлагает система" : ACT[i][2]}</small></button>`).join("")}</div>
-   <div class="actions" style="margin-top:12px"><a class="btn btn-ghost" href="#/candidates/${r.id}/vacancy/${encodeURIComponent(r.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор <kbd style="font:600 11px ui-monospace;color:var(--fg3)">Enter</kbd></a><span class="why" style="padding:0;margin-left:auto">${ic("key", "i-sm")} 1–4 — решение, ← → — листать</span></div></div>`;
+   <div class="actions" style="margin-top:12px"><a class="btn btn-ghost" href="#/candidates/${r.id}/vacancy/${encodeURIComponent(r.vacancy_id)}">${ic("list", "i-sm")}Открыть разбор <kbd style="font:600 11px ui-monospace;color:var(--fg3)">Enter</kbd></a><span class="why" style="padding:0;margin-left:auto">${ic("key", "i-sm")} 1–4 — решение, ← → — листать</span></div>${st.ti === rows.length - 1 ? moreBtn(rows.length, total) : ""}</div>`;
 }
 
-function bucketList(all, fit) {
+function bucketList(all, fit, total) {
   const spot = fit ? null : all.find((r) => r.spot_check);
   const rows = all.filter((r) => r !== spot); // проверяемый — отдельно сверху, не в пачке
   let h = spot
@@ -947,7 +969,7 @@ function bucketList(all, fit) {
           `<label class="trow"><input type="checkbox" checked data-pickrow="${r.id}"><span class="tile round ${fit ? "t-ok" : "t-bad"}">${ic("user")}</span><span><b>${cname(r.id)}</b><div class="rs">${ic(fit ? "check" : "x", "i-sm")} ${esc(whyShort(r.why))}</div></span><span class="num"><b>${num(r.score)}</b> <span class="lbl" style="display:inline">${num(r.low)}–${num(r.high)}</span></span><span class="rs">${esc(r.title)}</span></label>`,
       )
       .join("") || `<div class="stub" style="padding:16px">${ic("check", "c-full")}Пусто.</div>`
-  }`;
+  }${moreBtn(all.length, total)}`;
   if (rows.length)
     h += `<div class="tfoot"><span class="why" style="padding:0">${fit ? "Система предлагает отправить заказчику. Решение — ваше." : "Система предлагает отказ с причинами. Автоотказа нет — нужно ваше подтверждение."}</span>${
       fit
@@ -1470,7 +1492,7 @@ function enter(user) {
   const r = route();
   if (mgr() && !location.hash.startsWith("#/candidates")) return go("#/candidates");
   if (!mgr() && !location.hash) return go("#/triage");
-  if (r.name !== "triage" && !mgr()) api("/api/triage").then((t) => ($("#trbadge").textContent = t.need.length + t.fit.length + t.nofit.length || "")).catch(() => {});
+  if (r.name !== "triage" && !mgr()) api("/api/triage?limit=1").then((t) => ($("#trbadge").textContent = triLeft(t) || "")).catch(() => {});
   render();
 }
 
@@ -1529,6 +1551,9 @@ document.addEventListener("click", async (e) => {
     st.bk = el.dataset.bk;
     st.ti = 0;
     drawTriage();
+  } else if (on("[data-tmore]")) {
+    st.tlim += TRI_PAGE;
+    renderTriage();
   } else if ((el = on("[data-tn]"))) {
     st.ti += +el.dataset.tn;
     drawTriage();
@@ -1573,6 +1598,10 @@ document.addEventListener("click", async (e) => {
     }
   } else if ((el = on("[data-pg]"))) setF({ p: +el.dataset.pg > 1 ? el.dataset.pg : "" });
   else if ((el = on("[data-bulk]"))) bulk(+el.dataset.bulk);
+  else if ((el = on("[data-bulkok]"))) {
+    modal("confirm", null);
+    bulk(+el.dataset.bulkok, true);
+  }
   else if ((el = on("[data-showclosed]"))) {
     st.vclosed = !st.vclosed;
     renderVacs(route());
