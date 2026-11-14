@@ -252,6 +252,9 @@ def test_ui_static(api: TestClient) -> None:
     assert css.status_code == 200 and ".wrap" in css.text
     assert "http" not in js.text.replace("/api/", "")  # без CDN: работает без интернета
     assert 'src="/tour.js"' in page.text
+    # «Сводка» — первый пункт шапки и только у рекрутера (data-rec прячет у руководителя)
+    nav = page.text.index('href="#/dashboard" data-sec="dashboard" data-rec')
+    assert nav < page.text.index('href="#/triage"')
     tour = api.get("/tour.js")
     assert tour.status_code == 200 and "http" not in tour.text
 

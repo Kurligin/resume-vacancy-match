@@ -1,4 +1,4 @@
-// Интерфейс: вход, «Разбор», «Кандидаты», «Вакансии», разбор кандидата, пакет для заказчика, загрузка. Данные — из /api, без сборки.
+// Интерфейс: вход, «Сводка», «Разбор», «Кандидаты», «Вакансии», разбор кандидата, пакет для заказчика, загрузка. Данные — из /api, без сборки.
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) =>
@@ -94,6 +94,7 @@ function route() {
   if (p[0] === "candidates" && p[1]) return { name: "base", id: +p[1] };
   if (p[0] === "vacancies") return { name: "vacancies", vid: p[1] ? decodeURIComponent(p[1]) : null };
   if (p[0] === "triage") return { name: "triage" };
+  if (p[0] === "dashboard") return { name: "dashboard", days: [1, 7, 30].includes(+p[1]) ? +p[1] : 7 };
   return { name: "base", id: null };
 }
 
@@ -114,14 +115,19 @@ const go = (hash) => {
 async function render(scroll = false) {
   if (!st.me) return;
   const r = route();
-  if (mgr() && (r.name === "triage" || r.name === "vacancies")) return go("#/candidates");
+  if (mgr() && ["triage", "vacancies", "dashboard"].includes(r.name)) return go("#/candidates");
   for (const a of document.querySelectorAll(".nav a")) {
     const on = a.dataset.sec === (r.name === "cand" || r.name === "base" ? "candidates" : r.name);
     if (on) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
   $("#summary").hidden = $("#detail").hidden = r.name !== "cand";
+  $(".wrap").classList.toggle("full", r.name === "dashboard"); // у «Сводки» нет правой колонки
   if (scroll) window.scrollTo({ top: 0 });
+  if (r.name === "dashboard") {
+    stopPoll();
+    return renderDash(r);
+  }
   if (r.name === "triage") {
     stopPoll();
     return renderTriage();
@@ -355,6 +361,93 @@ function topCand(vac) {
     })
     .join("")}</div>`;
   return h;
+}
+
+/* ---------- «Сводка» ---------- */
+
+const PERIOD = { 1: "Сегодня", 7: "7 дней", 30: "30 дней" };
+const SRC_COLOR = ["#0071e3", "#7fb2ef", "#c7c7cc", "#34c759", "#ff9f0a"];
+const big = (n) => n.toLocaleString("ru-RU");
+// 0,6 дня · 1 день · 3 дня · 5 дней
+const dn = (x) => `${big(x)} ${Number.isInteger(x) ? plural(x, "день", "дня", "дней") : "дня"}`;
+const dlabel = (iso, short) => {
+  const d = new Date(iso + "T00:00");
+  const dm = `${d.getDate()}.${d.getMonth() + 1}`;
+  return short ? dm : `${d.toLocaleDateString("ru-RU", { weekday: "short" })} ${dm}`;
+};
+
+async function renderDash(r) {
+  if (!view.dash) $("#top").innerHTML = stateBox("load", "Собираем сводку…");
+  let d;
+  try {
+    d = await api(`/api/dashboard?days=${r.days}`);
+  } catch (e) {
+    d = e;
+  }
+  const now = route();
+  if (now.name !== "dashboard" || now.days !== r.days) return; // пока ждали, ушли с экрана или сменили период
+  $("#top").innerHTML = d instanceof Error ? failed(d) : topDash(d);
+  view.dash = true;
+}
+
+function topDash(d) {
+  const at = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const seg = `<div class="seg" role="group" aria-label="Период">${Object.entries(PERIOD)
+    .map(([k, v]) => `<button aria-pressed="${+k === d.days}" data-href="#/dashboard/${k}">${v}</button>`)
+    .join("")}</div>`;
+  const srcs = Object.keys(d.by_source).sort((a, b) => d.by_source[b] - d.by_source[a]);
+  const color = (s) => SRC_COLOR[srcs.indexOf(s) % SRC_COLOR.length];
+  const q = d.queue;
+  const sent = d.vacancies.reduce((a, v) => a + v.to_customer, 0);
+  const tile = (k, v, sub, cls = "") =>
+    `<div class="card stat ${cls}"><div class="k">${k}</div><div class="v num">${big(v)}</div><div class="s">${sub}</div></div>`;
+  const oldest = q.oldest_days == null ? "очередь пуста" : `самый старый — ${q.oldest_days ? dn(q.oldest_days) : "сегодня"}`;
+  return `<div class="head dhead"><span class="avatar blue">${ic("chart")}</span><div class="who"><h1>Сводка</h1>
+    <div class="sub"><span>Поток откликов, очередь и воронка по вакансиям · обновлено ${at}</span></div></div><div class="side">${seg}</div></div>
+   <div class="stats dstats">
+    ${tile(d.days === 1 ? "Откликов сегодня" : `Откликов за ${PERIOD[d.days]}`, d.applications, srcs.map((s) => `${esc(s)} ${big(d.by_source[s])}`).join(" · ") || "за период откликов нет")}
+    ${tile("Ждут разбора", q.count, oldest)}
+    ${tile(`Ждут дольше ${q.sla_days} ${plural(q.sla_days, "дня", "дней", "дней")}`, q.over_sla, q.over_sla ? `<a class="lnk" href="#/triage">Открыть в «Разборе» ›</a>` : "все в срок", q.over_sla ? "warn hot" : "")}
+    ${tile("Передано заказчикам", sent, `ждут их решения: ${big(d.customer.count)}`)}
+   </div>
+   <div class="card heat"><div class="heat-h"><b>${ic("chart", "c-acc")}Поток откликов по дням</b><span class="legend">${srcs
+     .map((s) => `<span><i style="background:${color(s)}"></i>${esc(s)}</span>`)
+     .join("")}</span></div>${flowChart(d, srcs, color)}</div>
+   <div class="card heat"><div class="heat-h"><b>${ic("brief", "c-acc")}Воронка по вакансиям</b></div>${funnel(d)}</div>`;
+}
+
+function flowChart(d, srcs, color) {
+  const max = Math.max(...d.flow.map((x) => x.total));
+  if (!max) return `<div class="stub">${ic("inbox")}За период откликов не было.</div>`;
+  const n = d.flow.length;
+  const wide = n > 7; // 30 дней: узкие столбики, подпись у каждого пятого (от сегодня)
+  const cols = d.flow.map((x) => {
+    // сверху — редкие источники, внизу — основной, как в легенде справа налево
+    const parts = [...srcs].reverse().filter((s) => x.by_source[s]);
+    const tip = `${dlabel(x.date)}: ${x.total}${parts.length > 1 ? ` (${srcs.filter((s) => x.by_source[s]).map((s) => `${s} ${x.by_source[s]}`).join(", ")})` : ""}`;
+    return `<div class="dcol" title="${esc(tip)}">${wide ? "" : `<span class="dn num">${x.total || ""}</span>`}${parts
+      .map((s) => `<i style="height:${Math.max(2, (x.by_source[s] / max) * 180)}px;background:${color(s)}"></i>`)
+      .join("")}</div>`;
+  });
+  const labels = d.flow.map((x, i) => `<span>${wide && (n - 1 - i) % 5 ? "" : dlabel(x.date, wide)}</span>`);
+  const cls = wide ? "wide" : "";
+  return `<div class="dchart ${cls}" style="--n:${n}" role="img" aria-label="Отклики по дням: ${d.flow.map((x) => `${dlabel(x.date, true)} — ${x.total}`).join(", ")}">${cols.join("")}</div>
+   <div class="dlbl ${cls}" style="--n:${n}" aria-hidden="true">${labels.join("")}</div>`;
+}
+
+function funnel(d) {
+  if (!d.vacancies.length) return `<div class="stub">${ic("brief")}За период откликов на вакансии не было.</div>`;
+  const sla = d.queue.sla_days;
+  const rows = d.vacancies.map((v) => {
+    const pct = v.applied ? ` <span class="mut">· ${Math.round((v.reviewed / v.applied) * 100)} %</span>` : "";
+    const late = v.customer_waiting && v.customer_oldest_days > sla;
+    const wait = late ? `<span class="late">${big(v.customer_waiting)} · до ${v.customer_oldest_days} дн.</span>` : big(v.customer_waiting);
+    const name = v.vacancy_id
+      ? `<a class="lnk" href="#/vacancies/${encodeURIComponent(v.vacancy_id)}">${esc(v.title ?? v.vacancy_id)}</a>`
+      : `<span class="mut">Вакансия не определена</span>`;
+    return `<tr><td>${name}</td><td>${big(v.applied)}</td><td>${big(v.reviewed)}${pct}</td><td>${big(v.to_customer)}</td><td>${big(v.customer_decided)}</td><td>${big(v.rejected)}</td><td>${big(v.kept)}</td><td>${v.median_decision_days == null ? "—" : dn(v.median_decision_days)}</td><td>${wait}</td></tr>`;
+  });
+  return `<div class="dscroll"><table class="dt"><thead><tr><th>Вакансия</th><th>Откликов</th><th>Разобрано</th><th>Заказчику</th><th>Решение заказчика</th><th>Отказ</th><th>Резерв / другая</th><th>Отклик → решение</th><th>Ждёт заказчика</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
 /* ---------- «Вакансии» ---------- */
