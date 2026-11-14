@@ -62,3 +62,38 @@ def test_demo_cache_copied_fresh(tmp_path: Path) -> None:
     with sqlite3.connect(cache) as c:
         (created,) = c.execute("SELECT created FROM cache").fetchone()
     assert created > time.time() - 60  # срок жизни кэша отсчитывается от старта
+
+
+def test_seed_resumes_after_failed_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    start = _start()
+    monkeypatch.setenv("RVM_HASH_SALT", "s" * 32)
+    monkeypatch.setenv("RVM_SECRET", "k" * 32)
+    db, cache = tmp_path / "rvm.sqlite", tmp_path / "cache.sqlite"
+    real = start.TestClient
+
+    class Broken(real):  # type: ignore[misc,valid-type]
+        def post(self, url: str, *a: object, **kw: object) -> object:
+            if url == "/api/uploads":
+                raise RuntimeError("засев упал на резюме")
+            return super().post(url, *a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(start, "TestClient", Broken)
+    with pytest.raises(RuntimeError):
+        start.seed(db, DEMO, cache)
+    assert len(store.list_vacancies(db)) == len(VACANCIES) and not store.list_candidates(db)
+    monkeypatch.setattr(start, "TestClient", real)
+    assert start.seed(db, DEMO, cache)  # перезапуск догружает резюме, вакансии не дублирует
+    assert len(store.list_vacancies(db)) == len(VACANCIES)
+    assert len(store.list_candidates(db)) == len(RESUMES)
+    assert not start.seed(db, DEMO, cache)
+
+
+def test_seed_skips_own_vacancies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from rvm.models import Document, Line
+
+    start = _start()
+    db = tmp_path / "rvm.sqlite"
+    store.init(db)
+    store.add_vacancy(db, Document(name="v", lines=[Line(n=1, text="Своя вакансия")]))
+    assert not start.seed(db, DEMO, tmp_path / "cache.sqlite")  # без метки засева — база своя
+    assert not store.list_candidates(db) and len(store.list_vacancies(db)) == 1

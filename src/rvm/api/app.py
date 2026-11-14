@@ -36,7 +36,7 @@ from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rvm import store
-from rvm.api import auth, hh, package, triage
+from rvm.api import auth, dashboard, hh, package, triage
 from rvm.api.auth import Anyone, Manager, Recruiter
 from rvm.ingest import limits, load_bytes, load_text
 from rvm.llm import LLMClient
@@ -147,6 +147,7 @@ class Card(Flow):
 
 class StatusChange(BaseModel):
     status: CandidateStatus
+    undo: bool = False  # отмена предыдущего решения кнопкой «Отменить»
 
 
 class RowAnswer(BaseModel):
@@ -272,16 +273,18 @@ def create_app(
     db = db or Path(env.get("RVM_DB", "var/rvm.sqlite"))
     store.init(db)
     if llm is None:
-        if env.get("LLM_MODE", "live") == "live" and not env.get("LLM_API_KEY"):
-            log.warning(
-                "LLM_API_KEY не задан — режим demo: ответы из кэша, новые файлы разбирает "
-                "демо-модель без ИИ"
-            )
+        mode = env.get("LLM_MODE", "live")
+        if mode == "demo" or (mode == "live" and not env.get("LLM_API_KEY")):
+            if mode == "live":
+                log.warning(
+                    "LLM_API_KEY не задан — режим demo: ответы из кэша, новые файлы разбирает "
+                    "демо-модель без ИИ"
+                )
             llm = LLMClient(DemoFake(), mode="demo")
-        elif not env.get("LLM_MODEL"):
+        elif mode == "live" and not env.get("LLM_MODEL"):
             raise RuntimeError("LLM_API_KEY задан, а LLM_MODEL пуст: укажите id модели в .env")
         else:
-            llm = LLMClient()
+            llm = LLMClient()  # неизвестный LLM_MODE — ValueError в клиенте
     if not env.get("RVM_SECRET"):
         log.warning("RVM_SECRET не задан — ключ сессий случайный, вход сбросится при перезапуске")
     secret = env.get("RVM_SECRET", "").encode() or secrets.token_bytes(32)
@@ -652,7 +655,8 @@ def create_app(
     @app.patch("/api/candidates/{candidate_id}", summary="Сменить статус кандидата")
     def change_status(candidate_id: int, body: StatusChange, user: Recruiter) -> dict[str, bool]:
         try:
-            store.set_status(db, candidate_id, body.status, who=user.who)
+            undo = {"undo": True} if body.undo else {}
+            store.set_status(db, candidate_id, body.status, who=user.who, **undo)
         except KeyError as e:
             raise not_found(e) from e
         return {"ok": True}
@@ -790,6 +794,7 @@ def create_app(
         return Health(mode=llm.mode, model=llm.model, version=version("rvm"))
 
     app.include_router(triage.router(db, batch_ids))
+    app.include_router(dashboard.router(db, llm.usage_path))
     app.include_router(package.router(db))
     app.include_router(hh.router(db, start_reserve))
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

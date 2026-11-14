@@ -30,6 +30,7 @@ def test_parses_and_sends_strict_schema(tmp_path: Path) -> None:
     assert call["response_format"]["type"] == "json_schema"
     assert call["response_format"]["json_schema"]["strict"] is True
     usage = json.loads((tmp_path / "usage.jsonl").read_text().splitlines()[0])
+    assert usage.pop("at")
     assert usage == {"model": "m", "prompt_tokens": 10, "completion_tokens": 5}
 
 

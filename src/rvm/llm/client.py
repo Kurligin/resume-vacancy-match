@@ -9,6 +9,7 @@ import os
 import sqlite3
 import time
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,7 @@ class LLMClient:
         if resp.usage is not None:
             with self.usage_path.open("a", encoding="utf-8") as f:
                 rec = {
+                    "at": datetime.now(UTC).isoformat(),  # для расхода за период в «Сводке»
                     "model": self.model,
                     "prompt_tokens": resp.usage.prompt_tokens,
                     "completion_tokens": resp.usage.completion_tokens,

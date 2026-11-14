@@ -1,5 +1,8 @@
 """Числа балла и рейтинга — все в одном месте, подбор порогов позже."""
 
+import os
+from zoneinfo import ZoneInfo
+
 from rvm.models import Section, Status
 
 WEIGHTS: dict[Section, float] = {
@@ -25,3 +28,8 @@ REDIRECT_FAILS = 2  # провалов вакансии отклика в при
 TRIAGE_WIDE = 30.0  # вилка шире — «нужно ваше решение»
 TRIAGE_NEAR = 5.0  # балл в ± от порога вердикта — «нужно ваше решение»
 SPOT_EVERY = 10  # из стольких «явно не подходят» одна — на выборочную проверку
+
+# «Сводка»: сколько дней отклик может ждать разбора
+SLA_DAYS = int(os.environ.get("RVM_SLA_DAYS", "2"))
+# пояс календарных дней «Сводки»: не зависит от TZ контейнера
+TZ = ZoneInfo(os.environ.get("RVM_TZ", "Europe/Moscow"))
