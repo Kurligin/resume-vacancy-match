@@ -1493,6 +1493,8 @@ function enter(user) {
   if (mgr() && !location.hash.startsWith("#/candidates")) return go("#/candidates");
   if (!mgr() && !location.hash) return go("#/triage");
   if (r.name !== "triage" && !mgr()) api("/api/triage?limit=1").then((t) => ($("#trbadge").textContent = triLeft(t) || "")).catch(() => {});
+  // счётчик «Кандидаты» сразу после входа, а не только после открытия раздела
+  if (r.name !== "base" && !mgr()) api("/api/stats").then((s) => ($("#navbadge").textContent = s.waiting || "")).catch(() => {});
   render();
 }
 
