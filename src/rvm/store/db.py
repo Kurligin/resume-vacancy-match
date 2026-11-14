@@ -120,7 +120,17 @@ INSERT INTO sqlite_sequence (name, seq) SELECT 'candidates', 0
 UPDATE sqlite_sequence SET seq=max(seq, (SELECT coalesce(max(candidate_id), 0) FROM events))
     WHERE name='candidates';
 """
-_MIGRATIONS = [_V1, _V2]  # user_version = число применённых
+# v3: индексы под фильтры и сортировку списка кандидатов (evaluations(resume_id) покрыт ключом)
+_V3 = """
+CREATE INDEX IF NOT EXISTS candidates_status_created ON candidates(status, created_at);
+CREATE INDEX IF NOT EXISTS candidates_created ON candidates(created_at);
+"""
+_MIGRATIONS = [_V1, _V2, _V3]  # user_version = число применённых
+# последняя версия резюме кандидата c и лучшая вакансия версии r (как места в отчёте)
+LAST_RESUME = "(SELECT max(id) FROM resumes WHERE candidate_id=c.id)"
+BEST_EVAL = (
+    "FROM evaluations WHERE resume_id=r.id ORDER BY place IS NULL, place, score DESC LIMIT 1"
+)
 
 
 class CandidateStatus(StrEnum):
@@ -331,24 +341,89 @@ def _candidate_of(conn: sqlite3.Connection, resume_id: int) -> int:
 
 def load_report(db: Path, resume_id: int) -> Report:
     """Отчёт целиком для показа рекрутеру — с исходным текстом резюме."""
+    rep = load_reports(db, [resume_id]).get(resume_id)
+    if rep is None:
+        raise KeyError(f"нет отчёта по резюме {resume_id}")
+    return rep
+
+
+def load_reports(db: Path, resume_ids: list[int], brief: bool = False) -> dict[int, Report]:
+    """Отчёты пачкой за одно соединение (как load_report); без разбора — нет в ответе.
+    brief — для «Разбора»: только лучшая вакансия и без текста резюме (разбор JSON дорогой)."""
+    ids = json.dumps(resume_ids)
+    best = f" AND vacancy_id=(SELECT vacancy_id {BEST_EVAL})" if brief else ""
     with _tx(db, write=False) as conn:
-        r = conn.execute("SELECT * FROM resumes WHERE id=?", (resume_id,)).fetchone()
-        if r is None or r["analysis"] is None:
-            raise KeyError(f"нет отчёта по резюме {resume_id}")
-        evals = conn.execute(
-            "SELECT result FROM evaluations WHERE resume_id=? ORDER BY place IS NULL, place",
-            (resume_id,),
+        rows = conn.execute(
+            "SELECT id, name, status, analysis"
+            + ("" if brief else ", lines, original")
+            + " FROM resumes WHERE analysis IS NOT NULL AND id IN (SELECT value FROM json_each(?))",
+            (ids,),
         ).fetchall()
-    view = ResumeView(
-        name=r["name"],
-        lines=_LINES.validate_json(r["lines"]),
-        original=_LINES.validate_json(r["original"]),
-        status=r["status"],
-    )
-    data = json.loads(r["analysis"])
-    data["resume"] = view
-    data["vacancies"] = [VacancyResult.model_validate_json(e["result"]) for e in evals]
-    return Report.model_validate(data)
+        evals: dict[int, list[VacancyResult]] = {}
+        for e in conn.execute(
+            "SELECT r.id, e.result FROM resumes r JOIN evaluations e ON e.resume_id=r.id"
+            f" WHERE r.id IN (SELECT value FROM json_each(?)){best}"
+            " ORDER BY r.id, e.place IS NULL, e.place",
+            (ids,),
+        ):
+            evals.setdefault(e[0], []).append(VacancyResult.model_validate_json(e[1]))
+    out = {}
+    for r in rows:
+        data = json.loads(r["analysis"])
+        data["resume"] = ResumeView(
+            name=r["name"],
+            lines=[] if brief else _LINES.validate_json(r["lines"]),
+            original=[] if brief else _LINES.validate_json(r["original"]),
+            status=r["status"],
+        )
+        data["vacancies"] = evals.get(r["id"], [])
+        out[r["id"]] = Report.model_validate(data)
+    return out
+
+
+def _candidate_filter(
+    status: CandidateStatus | None,
+    q: str | None,
+    vacancy: str | None,
+    verdicts: list[str] | None,
+    source: str | None,
+    since: str | None,
+) -> tuple[str, list[Any]]:
+    """WHERE для списка: c — кандидат, r — его последняя версия резюме."""
+    where: list[str] = []
+    args: list[Any] = []
+    if status is not None:
+        where.append("c.status=?")
+        args.append(str(status))
+    if q:
+        where.append(
+            "EXISTS (SELECT 1 FROM resumes r2 WHERE r2.candidate_id=c.id"
+            " AND instr(ulower(r2.lines), ?) > 0)"
+        )
+        args.append(q.lower())
+    if vacancy is not None:  # отклик или лучшая вакансия последней версии
+        where.append(
+            f"(json_extract(r.analysis, '$.applied')=? OR (SELECT vacancy_id {BEST_EVAL})=?)"
+        )
+        args += [vacancy, vacancy]
+    if verdicts:  # по выбранной вакансии, без неё — по лучшей
+        marks = ",".join("?" * len(verdicts))
+        if vacancy is not None:
+            where.append(
+                f"(SELECT verdict FROM evaluations WHERE resume_id=r.id AND vacancy_id=?)"
+                f" IN ({marks})"
+            )
+            args.append(vacancy)
+        else:
+            where.append(f"(SELECT verdict {BEST_EVAL}) IN ({marks})")
+        args += verdicts
+    if source is not None:
+        where.append("c.source=?")
+        args.append(source)
+    if since is not None:
+        where.append("c.created_at>=?")
+        args.append(since)
+    return ("WHERE " + " AND ".join(where)) if where else "", args
 
 
 def list_candidates(
@@ -356,29 +431,45 @@ def list_candidates(
     status: CandidateStatus | None = None,
     q: str | None = None,
     sort: Literal["score", "date"] = "score",
+    *,
+    vacancy: str | None = None,
+    verdicts: list[str] | None = None,
+    source: str | None = None,
+    since: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Карточки с лучшим баллом; q ищет по обезличенному тексту резюме (должность, навыки)."""
-    where, args = [], []
-    if status is not None:
-        where.append("c.status=?")
-        args.append(str(status))
-    if q:
-        where.append(
-            "EXISTS (SELECT 1 FROM resumes r WHERE r.candidate_id=c.id"
-            " AND instr(ulower(r.lines), ?) > 0)"
-        )
-        args.append(q.lower())
+    """Карточки с лучшим баллом; q ищет по обезличенному тексту резюме (должность, навыки).
+    Фильтры, сортировка и страница — в SQL; сколько найдено всего — count_candidates."""
+    where, args = _candidate_filter(status, q, vacancy, verdicts, source, since)
     order = "best_score IS NULL, best_score DESC" if sort == "score" else "c.created_at DESC"
     sql = (
         "SELECT c.id, c.status, c.created_at, c.source,"
-        " (SELECT count(*) FROM resumes r WHERE r.candidate_id=c.id) AS versions,"
-        " (SELECT max(e.score) FROM evaluations e JOIN resumes r ON r.id=e.resume_id"
-        "  WHERE r.candidate_id=c.id) AS best_score"
-        f" FROM candidates c {'WHERE ' + ' AND '.join(where) if where else ''}"
-        f" ORDER BY {order}, c.id DESC"
+        " (SELECT count(*) FROM resumes v WHERE v.candidate_id=c.id) AS versions,"
+        " (SELECT max(e.score) FROM evaluations e JOIN resumes v ON v.id=e.resume_id"
+        "  WHERE v.candidate_id=c.id) AS best_score"
+        f" FROM candidates c LEFT JOIN resumes r ON r.id={LAST_RESUME} {where}"
+        f" ORDER BY {order}, c.id DESC LIMIT ? OFFSET ?"
     )
     with _tx(db, write=False) as conn:
-        return [dict(r) for r in conn.execute(sql, args)]
+        return [dict(r) for r in conn.execute(sql, [*args, -1 if limit is None else limit, offset])]
+
+
+def count_candidates(
+    db: Path,
+    status: CandidateStatus | None = None,
+    q: str | None = None,
+    *,
+    vacancy: str | None = None,
+    verdicts: list[str] | None = None,
+    source: str | None = None,
+    since: str | None = None,
+) -> int:
+    """Сколько карточек под теми же фильтрами, что у list_candidates."""
+    where, args = _candidate_filter(status, q, vacancy, verdicts, source, since)
+    sql = f"SELECT count(*) FROM candidates c LEFT JOIN resumes r ON r.id={LAST_RESUME} {where}"
+    with _tx(db, write=False) as conn:
+        return int(conn.execute(sql, args).fetchone()[0])
 
 
 def card(db: Path, candidate_id: int) -> dict[str, Any]:
@@ -631,11 +722,43 @@ def close_vacancy(db: Path, vacancy_id: str, who: str = RECRUITER) -> None:
 
 
 def list_vacancies(db: Path) -> list[dict[str, Any]]:
+    """Вакансии со счётчиками по последним версиям резюме: applied — откликов, waiting — из них
+    не разобрано (new/review), fit — «подходит», to_customer — у заказчика с этой вакансией
+    (вакансия последней смены статуса)."""
     with _tx(db, write=False) as conn:
         rows = conn.execute(
             "SELECT id, title, source, is_open, created_at FROM vacancies ORDER BY id"
         ).fetchall()
-    return [{**dict(r), "id": str(r["id"]), "is_open": bool(r["is_open"])} for r in rows]
+        counts = {
+            r["vid"]: dict(r)
+            for r in conn.execute(
+                f"""WITH last AS (SELECT c.id AS cid, c.status, {LAST_RESUME} AS rid
+                    FROM candidates c),
+                x AS (
+                    SELECT json_extract(r.analysis, '$.applied') AS vid, 1 AS applied,
+                        l.status IN ('new', 'review') AS waiting, 0 AS fit, 0 AS cust
+                    FROM last l JOIN resumes r ON r.id=l.rid
+                    UNION ALL
+                    SELECT e.vacancy_id, 0, 0, 1, 0 FROM last l
+                    JOIN evaluations e ON e.resume_id=l.rid WHERE e.verdict='fit'
+                    UNION ALL
+                    SELECT ev.vacancy_id, 0, 0, 0, 1 FROM last l JOIN events ev ON ev.id=(
+                        SELECT max(id) FROM events WHERE candidate_id=l.cid AND type='status')
+                    WHERE l.status='cust'
+                )
+                SELECT CAST(vid AS TEXT) AS vid, sum(applied) AS applied, sum(waiting) AS waiting,
+                    sum(fit) AS fit, sum(cust) AS to_customer
+                FROM x WHERE vid IS NOT NULL GROUP BY 1"""
+            )
+        }
+    out = []
+    for r in rows:
+        n = counts.get(str(r["id"]), {})
+        out.append(
+            {**dict(r), "id": str(r["id"]), "is_open": bool(r["is_open"])}
+            | {k: n.get(k, 0) for k in ("applied", "waiting", "fit", "to_customer")}
+        )
+    return out
 
 
 def vacancy_candidates(db: Path, vacancy_id: str) -> list[dict[str, Any]]:

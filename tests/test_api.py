@@ -543,3 +543,34 @@ def test_manager_sees_no_recruiter_comments(app: FastAPI, api: TestClient) -> No
     assert events and {e["type"] for e in events} == {"status"}
     assert "секрет" not in str(events)
     assert any(e["details"].get("comment") == "моё" for e in events)
+
+
+def test_candidates_page_filters_and_vacancy_counters(app: FastAPI, api: TestClient) -> None:
+    vid = add_vacancy(api, "Python-разработчик\nТребования: Python")
+    files = wait_batch(
+        api, upload(api, [(f"{i}.txt", resume(i)) for i in range(1, 6)], applied=vid)
+    )
+    ids = [f["candidate_id"] for f in files]
+    api.patch(f"/api/candidates/{ids[0]}", json={"status": "cust"})
+
+    assert isinstance(api.get("/api/candidates").json(), list)  # без page — старый формат
+    r = api.get("/api/candidates", params={"page": 1, "limit": 2, "offset": 1, "sort": "date"})
+    body = r.json()
+    assert (body["total"], body["limit"], body["offset"], len(body["items"])) == (5, 2, 1, 2)
+    everyone = [c["id"] for c in api.get("/api/candidates", params={"sort": "date"}).json()]
+    assert [c["id"] for c in body["items"]] == everyone[1:3]
+    assert api.get("/api/candidates", params={"page": 1}).json()["limit"] == 50
+    assert api.get("/api/candidates", params={"page": 1, "limit": 201}).status_code == 422
+    assert api.get("/api/candidates", params={"verdict": "fit,чепуха"}).status_code == 422
+    one = api.get("/api/candidates", params={"page": 1, "status": "cust", "days": 7}).json()
+    assert [c["id"] for c in one["items"]] == [ids[0]] and one["total"] == 1
+    assert api.get("/api/candidates", params={"page": 1, "vacancy": vid}).json()["total"] == 5
+    assert api.get("/api/candidates", params={"page": 1, "source": "hh"}).json()["total"] == 0
+
+    with client(app, "manager") as boss:
+        page = boss.get("/api/candidates", params={"page": 1, "status": "new"}).json()
+        assert [c["id"] for c in page["items"]] == [ids[0]] and page["total"] == 1
+
+    v = next(x for x in api.get("/api/vacancies").json() if x["id"] == vid)
+    assert v["applied"] == 5 and v["waiting"] == 4
+    assert {"fit", "to_customer"} <= v.keys()

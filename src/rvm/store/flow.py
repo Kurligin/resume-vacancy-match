@@ -4,12 +4,39 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from rvm.models import Line
-from rvm.store.db import _LINES, RECRUITER, CandidateStatus, _event, _tx
+from rvm.store.db import (
+    _LINES,
+    BEST_EVAL,
+    LAST_RESUME,
+    RECRUITER,
+    CandidateStatus,
+    _event,
+    _tx,
+)
 
 UNDECIDED = (CandidateStatus.NEW, CandidateStatus.REVIEW)
+
+
+class Brief(NamedTuple):
+    """Лучшая оценка резюме для корзин «Разбора» — без разбора JSON отчёта целиком."""
+
+    status: str  # статус отчёта (ReportStatus)
+    vacancy_id: str | None  # None — оценок нет
+    title: str | None
+    score: float | None
+    low: float | None
+    high: float | None
+    verdict: str | None
+    blockers: list[str]  # тексты невыполненных обязательных (id, если текста нет)
+    clarified: set[str]  # id прояснённых проверок
+    redirect_from: str | None  # вакансия отклика при переадресации
+    redirect_title: str | None  # её название
+    discrepancies: int
+
+
 _MASK = re.compile(r"(\[[^\]\n]+\])")
 
 
@@ -20,31 +47,69 @@ def summaries(db: Path, ids: list[int] | None = None) -> dict[int, dict[str, Any
     sql = (
         "SELECT c.id, c.status, c.created_at, r.id AS resume_id,"
         " json_extract(r.analysis, '$.facts.resume.periods') AS periods,"
-        " (SELECT min(at) FROM events WHERE candidate_id=c.id AND type='reply_sent') AS replied_at"
-        " FROM candidates c LEFT JOIN resumes r"
-        " ON r.id=(SELECT max(id) FROM resumes WHERE candidate_id=c.id)"
+        " (SELECT min(at) FROM events WHERE candidate_id=c.id AND type='reply_sent') AS replied_at,"
+        " b.vacancy_id AS best_vacancy, json_extract(b.result, '$.title') AS best_title,"
+        " b.score AS best_vacancy_score"
+        f" FROM candidates c LEFT JOIN resumes r ON r.id={LAST_RESUME}"
+        " LEFT JOIN evaluations b ON b.resume_id=r.id"
+        f" AND b.vacancy_id=(SELECT vacancy_id {BEST_EVAL})"
         f" {where}"
     )
-    out = {}
     with _tx(db, write=False) as conn:
-        for row in conn.execute(sql, ids or []).fetchall():
-            best = conn.execute(
-                "SELECT vacancy_id, json_extract(result, '$.title') AS title, score"
-                " FROM evaluations WHERE resume_id=? ORDER BY place IS NULL, place, score DESC",
-                (row["resume_id"],),
-            ).fetchone()
-            periods = json.loads(row["periods"] or "[]")
-            out[row["id"]] = {
-                "status": row["status"],
-                "created_at": row["created_at"],
-                "resume_id": row["resume_id"],
-                "position": next((p["title"] for p in periods if p.get("title")), None),
-                "best_vacancy": best and best["vacancy_id"],
-                "best_title": best and best["title"],
-                "best_vacancy_score": best and best["score"],
-                "replied_at": row["replied_at"],
-                "waiting": row["replied_at"] is None,
-            }
+        rows = conn.execute(sql, ids or []).fetchall()
+    out = {}
+    for row in rows:
+        periods = json.loads(row["periods"] or "[]")
+        out[row["id"]] = {
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "resume_id": row["resume_id"],
+            "position": next((p["title"] for p in periods if p.get("title")), None),
+            "best_vacancy": row["best_vacancy"],
+            "best_title": row["best_title"],
+            "best_vacancy_score": row["best_vacancy_score"],
+            "replied_at": row["replied_at"],
+            "waiting": row["replied_at"] is None,
+        }
+    return out
+
+
+def briefs(db: Path, resume_ids: list[int]) -> dict[int, Brief]:
+    """Brief по версиям резюме с разбором; поля берёт SQLite (json_extract), а не pydantic."""
+    sql = (
+        "SELECT r.id, json_extract(r.analysis, '$.status') AS status,"
+        " json_extract(r.analysis, '$.redirect.from_vacancy') AS redirect_from,"
+        " (SELECT title FROM vacancies WHERE id=json_extract(r.analysis,"
+        "  '$.redirect.from_vacancy')) AS redirect_title,"
+        " coalesce(json_array_length(r.analysis, '$.facts.discrepancies'), 0) AS discrepancies,"
+        " e.vacancy_id, json_extract(e.result, '$.title') AS title, e.score, e.low, e.high,"
+        " e.verdict, json_extract(e.result, '$.score.blockers') AS blockers,"
+        " json_extract(e.result, '$.clarified') AS clarified, CASE"
+        "  WHEN json_array_length(e.result, '$.score.blockers') > 0"
+        "  THEN json_extract(e.result, '$.requirements') END AS requirements"
+        " FROM resumes r LEFT JOIN evaluations e ON e.resume_id=r.id"
+        f" AND e.vacancy_id=(SELECT vacancy_id {BEST_EVAL})"
+        " WHERE r.analysis IS NOT NULL AND r.id IN (SELECT value FROM json_each(?))"
+    )
+    with _tx(db, write=False) as conn:
+        rows = conn.execute(sql, (json.dumps(resume_ids),)).fetchall()
+    out = {}
+    for r in rows:
+        text = {q["id"]: q["text"] for q in json.loads(r["requirements"] or "[]")}
+        out[r["id"]] = Brief(
+            status=r["status"],
+            vacancy_id=r["vacancy_id"],
+            title=r["title"],
+            score=r["score"],
+            low=r["low"],
+            high=r["high"],
+            verdict=r["verdict"],
+            blockers=[text.get(b, b) for b in json.loads(r["blockers"] or "[]")],
+            clarified=set(json.loads(r["clarified"] or "{}")),
+            redirect_from=r["redirect_from"],
+            redirect_title=r["redirect_title"],
+            discrepancies=r["discrepancies"],
+        )
     return out
 
 

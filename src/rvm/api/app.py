@@ -15,7 +15,7 @@ import zipfile
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -185,6 +185,17 @@ class VacancyItem(BaseModel):
     reserve_checked: int = 0  # сколько кандидатов из резерва проверено
     reserve_matches: list[int] = []  # кто из резерва подходит хотя бы частично
     reserve_error: str = ""
+    applied: int = 0  # откликов (последние версии резюме)
+    waiting: int = 0  # из откликнувшихся не разобрано: new / review
+    fit: int = 0  # «подходит» по этой вакансии
+    to_customer: int = 0  # у заказчика с этой вакансией
+
+
+class CandidatePage(BaseModel):
+    items: list[CandidateItem]
+    total: int  # найдено под фильтрами, без учёта страницы
+    limit: int
+    offset: int
 
 
 class VacancyCandidate(BaseModel):
@@ -582,19 +593,56 @@ def create_app(
 
     # --- кандидаты ---
 
-    @app.get("/api/candidates", summary="База кандидатов: поиск, фильтр по статусу, сортировка")
+    @app.get(
+        "/api/candidates",
+        summary="База кандидатов: поиск, фильтры, сортировка, страницы",
+        description="Без page — весь список массивом (как раньше). page=1 — ответ "
+        "{items, total, limit, offset}: limit по умолчанию 50, не больше 200.",
+    )
     def candidates(
         user: Anyone,
         status: CandidateStatus | None = None,
         q: Annotated[str | None, Query(description="поиск по должности и навыкам")] = None,
         sort: Literal["score", "date"] = "score",
         pii: Annotated[bool, Query(description="ФИО из исходного текста")] = False,
-    ) -> list[CandidateItem]:
+        vacancy: Annotated[str | None, Query(description="отклик или лучшая вакансия")] = None,
+        verdict: Annotated[
+            str | None, Query(description="через запятую: fit, partial, no_fit, no_data")
+        ] = None,
+        source: Annotated[str | None, Query(description="источник карточки")] = None,
+        days: Annotated[int | None, Query(ge=1, description="пришли за последние N дней")] = None,
+        page: Annotated[bool, Query(description="ответ страницей с total")] = False,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> list[CandidateItem] | CandidatePage:
         if user.role == "manager":
             status = CandidateStatus.CUST
-        rows = store.list_candidates(db, status, q, sort)
+        try:
+            verdicts = [str(Verdict(v.strip())) for v in verdict.split(",")] if verdict else None
+        except ValueError as e:
+            raise HTTPException(422, f"неизвестный вердикт: {verdict}") from e
+        since = (now() - timedelta(days=days)).isoformat() if days else None
+        filters: dict[str, Any] = {
+            "vacancy": vacancy,
+            "verdicts": verdicts,
+            "source": source,
+            "since": since,
+        }
+        rows = store.list_candidates(
+            db,
+            status,
+            q,
+            sort,
+            limit=limit if page else None,
+            offset=offset if page else 0,
+            **filters,
+        )
         extra = flow(user, pii, [c["id"] for c in rows])
-        return [CandidateItem(**c, **extra[c["id"]].model_dump()) for c in rows]
+        items = [CandidateItem(**c, **extra[c["id"]].model_dump()) for c in rows]
+        if not page:  # старый формат: текущий экран ждёт массив
+            return items
+        total = store.count_candidates(db, status, q, **filters)
+        return CandidatePage(items=items, total=total, limit=limit, offset=offset)
 
     @app.get("/api/candidates/{candidate_id}", summary="Карточка: версии, оценки, история")
     def candidate(candidate_id: int, user: Anyone, pii: bool = False) -> Card:
