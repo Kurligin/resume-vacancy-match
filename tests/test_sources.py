@@ -28,7 +28,9 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RVM_SECRET", "тестовый-секрет")
     monkeypatch.setenv("RVM_DEMO_LOGIN", "1")
     monkeypatch.setenv("RVM_POLL_MINUTES", "0")  # опрос в фоне в тестах не нужен
-    for k in [k for k in os.environ if k.startswith(("RVM_IMAP_", "RVM_INBOX_DIR"))]:
+    for k in [
+        k for k in os.environ if k.startswith(("RVM_IMAP_", "RVM_INBOX_DIR", "RVM_HH_TOKEN"))
+    ]:
         monkeypatch.delenv(k)
 
 
@@ -242,7 +244,11 @@ def test_sources_api(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     with client(app, "recruiter") as api:
         body = api.get("/api/sources").json()
-        assert {s["name"]: s["configured"] for s in body} == {"mail": False, "folder": False}
+        assert {s["name"]: s["configured"] for s in body} == {
+            "mail": False,
+            "hh": False,
+            "folder": False,
+        }
         mail = next(s for s in body if s["name"] == "mail")
         assert mail["needs"] == ["RVM_IMAP_HOST", "RVM_IMAP_USER", "RVM_IMAP_PASSWORD"]
         assert mail["recent"] == [] and mail["last_check"] is None

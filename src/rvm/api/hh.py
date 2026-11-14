@@ -26,15 +26,18 @@ _TAG = re.compile(r"<[^>]+>")
 _BREAK = re.compile(r"<\s*(br|/p|/li|/h\d|/div)\s*/?>", re.IGNORECASE)
 
 
-def fetch_json(url: str, params: dict[str, Any] | None = None) -> Any:
-    r = httpx.get(
-        url,
-        params=params,
-        headers={"User-Agent": USER_AGENT, "HH-User-Agent": USER_AGENT},
-        timeout=15,
-    )
+def get(url: str, params: dict[str, Any] | None = None, token: str = "") -> httpx.Response:
+    """GET к hh с HH-User-Agent; token — OAuth работодателя (отклики, скачивание резюме)."""
+    headers = {"User-Agent": USER_AGENT, "HH-User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    r = httpx.get(url, params=params, headers=headers, timeout=15)
     r.raise_for_status()
-    return r.json()
+    return r
+
+
+def fetch_json(url: str, params: dict[str, Any] | None = None, token: str = "") -> Any:
+    return get(url, params, token).json()
 
 
 def to_text(item: dict[str, Any]) -> str:

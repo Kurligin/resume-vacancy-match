@@ -14,6 +14,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from rvm.ingest import limits
 from rvm.sources.base import Fetched, Item
@@ -34,7 +35,7 @@ def _move(path: Path, sub: str) -> None:
 
 
 def fetch(
-    env: Mapping[str, str], vacancies: dict[str, str], seen: Callable[[str], bool]
+    env: Mapping[str, str], vacancies: dict[str, dict[str, Any]], seen: Callable[[str], bool]
 ) -> Fetched:
     root = Path(env["RVM_INBOX_DIR"])
     for sub in (DONE, ERROR):

@@ -1,7 +1,13 @@
 """Общие типы источников откликов."""
 
 from collections.abc import Callable, Mapping
-from typing import NamedTuple
+from typing import Any, NamedTuple
+
+from rvm.ingest import limits
+
+# за один опрос источника: элементов и байт (остальное — в следующий опрос)
+POLL_ITEMS = 100
+POLL_BYTES = limits.MAX_REQUEST_BYTES
 
 
 class Item(NamedTuple):
@@ -21,10 +27,12 @@ class Fetched(NamedTuple):
     queued: Callable[[list[str]], None] | None = None
     # после разбора всех файлов элемента: ok — без ошибок (папка: перенос в done/ или error/)
     done: Callable[[Item, bool], None] | None = None
+    # опрос прерван, но забранное отдаём (hh: 429, отказ в доступе) — в статус источника
+    error: str = ""
 
 
-# fetch(окружение, открытые вакансии {id: название}, seen(ref)) → новые элементы
-Fetch = Callable[[Mapping[str, str], dict[str, str], Callable[[str], bool]], Fetched]
+# fetch(окружение, открытые вакансии {id: строка store.list_vacancies}, seen(ref)) → новые элементы
+Fetch = Callable[[Mapping[str, str], dict[str, dict[str, Any]], Callable[[str], bool]], Fetched]
 
 
 class Source(NamedTuple):

@@ -1,4 +1,4 @@
-"""Источники откликов («Входящие»): почта, папка, дальше hh.
+"""Источники откликов («Входящие»): почта, hh, папка.
 
 Источник — функция fetch (см. base.Fetch), возвращающая новые элементы. Каждый элемент идёт в тот
 же конвейер, что и ручная загрузка (take из api.app: распаковка zip, лимиты, очередь разбора,
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from rvm import store
-from rvm.sources import folder, mail
+from rvm.sources import folder, hh, mail
 from rvm.sources.base import Fetch, Fetched, Item, Source
 
 __all__ = ["REGISTRY", "Fetch", "Fetched", "Inbox", "Item", "Source"]
@@ -30,6 +30,7 @@ REGISTRY = [
         ("RVM_IMAP_HOST", "RVM_IMAP_USER", "RVM_IMAP_PASSWORD"),
         mail.fetch,
     ),
+    Source("hh", "hh.ru", "hh", ("RVM_HH_TOKEN",), hh.fetch),
     Source("folder", "Папка", "папка", ("RVM_INBOX_DIR",), folder.fetch),
 ]
 RECENT = 20
@@ -125,7 +126,7 @@ class Inbox:
             st.update(day=self.today(), today_items=0, today_skipped=0)
         error = ""
         try:
-            vac = {v["id"]: v["title"] for v in store.list_vacancies(self.db) if v["is_open"]}
+            vac = {v["id"]: v for v in store.list_vacancies(self.db) if v["is_open"]}
             got = s.fetch(self.env, vac, lambda ref: store.seen(self.db, s.name, ref))
             for ref, why in got.skipped:
                 st["today_skipped"] += 1
@@ -140,6 +141,7 @@ class Inbox:
             )
             if got.queued and got.items:
                 got.queued([i.ref for i in got.items])
+            error = self._scrub(got.error)
         except Exception as e:  # noqa: BLE001 — сбой источника не валит сервис, виден в статусе
             error = self._scrub(f"{type(e).__name__}: {e}")
             log.warning("источник %s: %s", s.name, error)

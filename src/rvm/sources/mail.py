@@ -14,7 +14,7 @@ import imaplib
 from collections.abc import Callable, Mapping
 from email import policy
 from email.message import EmailMessage, Message
-from typing import cast
+from typing import Any, cast
 
 from rvm.ingest import SUFFIXES
 from rvm.sources.base import Fetched, Item
@@ -46,9 +46,10 @@ def _body(m: imaplib.IMAP4, uid: bytes, what: str) -> EmailMessage:
     return cast(EmailMessage, email.message_from_bytes(part[1], policy=policy.default))
 
 
-def _applied(subject: str, vacancies: dict[str, str]) -> str | None:
+def _applied(subject: str, vacancies: dict[str, dict[str, Any]]) -> str | None:
     subject = subject.casefold()
-    hits = [(len(t), vid) for vid, t in vacancies.items() if t and t.casefold() in subject]
+    titles = {vid: v["title"] for vid, v in vacancies.items()}
+    hits = [(len(t), vid) for vid, t in titles.items() if t and t.casefold() in subject]
     return max(hits)[1] if hits else None
 
 
@@ -58,7 +59,7 @@ def _signature(part: Message) -> bool:
 
 
 def fetch(
-    env: Mapping[str, str], vacancies: dict[str, str], seen: Callable[[str], bool]
+    env: Mapping[str, str], vacancies: dict[str, dict[str, Any]], seen: Callable[[str], bool]
 ) -> Fetched:
     items, skipped, uids = [], [], {}
     m = _connect(env)
