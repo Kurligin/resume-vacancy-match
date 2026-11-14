@@ -134,22 +134,22 @@ class Inbox:
             for ref, why in got.skipped:
                 st["today_skipped"] += 1
                 st["recent"].appendleft(self._entry(s.name, None, None, "skipped", why))
+            store.mark_seen(self.db, s.name, [r for r, _ in got.skipped])
             groups: dict[str, list[Item]] = {}  # вложения одного письма — одна пачка
             for it in got.items:
                 groups.setdefault(it.ref, []).append(it)
-            for group in groups.values():
+            for ref, group in groups.items():
                 bid, futures = self.take(group, s.source)
+                # сразу после take: сбой на следующем элементе не вернёт этот в очередь повторно
+                store.mark_seen(self.db, s.name, [ref])
                 st["today_items"] += len(group)
                 st["recent"].appendleft(self._entry(s.name, group[0].applied, bid))
                 _on_all(
                     futures,
                     lambda it=group[0], bid=bid, fs=futures: self._done(s, got, it, bid, fs),
                 )
-            store.mark_seen(
-                self.db, s.name, [r for r, _ in got.skipped] + [i.ref for i in got.items]
-            )
-            if got.queued and got.items:
-                got.queued([i.ref for i in got.items])
+            if got.queued and groups:
+                got.queued(list(groups))
             error = self._scrub(got.error)
         except Exception as e:  # noqa: BLE001 — сбой источника не валит сервис, виден в статусе
             error = self._scrub(f"{type(e).__name__}: {e}")

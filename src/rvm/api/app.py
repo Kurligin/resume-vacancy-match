@@ -7,6 +7,7 @@
 import hashlib
 import io
 import logging
+import math
 import os
 import secrets
 import threading
@@ -321,7 +322,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        minutes = float(env.get("RVM_POLL_MINUTES") or 5)
+        raw = env.get("RVM_POLL_MINUTES") or "5"
+        try:
+            minutes = float(raw)
+            if not math.isfinite(minutes):
+                raise ValueError(raw)
+        except ValueError:
+            log.warning("RVM_POLL_MINUTES=%r — не число, опрос раз в 5 минут", raw)
+            minutes = 5.0
+        if 0 < minutes < 1:
+            minutes = 1.0  # чаще раза в минуту почту и hh не дёргаем
         if minutes > 0 and inbox.configured():
             inbox.start(minutes)
         yield
@@ -453,6 +463,11 @@ def create_app(
         except HTTPException as e:
             items = [
                 (UploadFileState(name=it.name, state="error", message=str(e.detail)), b"")
+                for it in group
+            ]
+        if not items:  # пустой архив: в error/, а не тихо в done/
+            items = [
+                (UploadFileState(name=it.name, state="error", message="в архиве нет резюме"), b"")
                 for it in group
             ]
         return enqueue(items, group[0].applied, source)

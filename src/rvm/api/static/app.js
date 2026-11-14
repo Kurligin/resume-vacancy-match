@@ -1063,7 +1063,7 @@ function openVacUpload() {
 /* ---------- «Входящие»: отклики из почты, папки и hh ---------- */
 
 // слова для людей: без настроек, путей и кодов ошибок
-const SRC = {
+const INSRC = {
   mail: { tile: ic("mail"), short: "почта", head: (s) => `Почта${s.account ? ` · ${s.account}` : ""}`, what: "письма с резюме", obj: "почту" },
   hh: { tile: "<b>hh</b>", short: "hh", head: () => "hh.ru · отклики на вакансии МФТИ", what: "отклики с hh", obj: "отклики с hh.ru" },
   folder: { tile: ic("folder"), short: "папка", head: () => "Общая папка «Резюме»", what: "резюме из общей папки", obj: "общую папку" },
@@ -1078,7 +1078,7 @@ const today = (iso) => new Date(iso).toDateString() === new Date().toDateString(
 let inboxTimer;
 
 function srcRow(s) {
-  const k = SRC[s.name] ?? { tile: ic("inbox"), head: () => s.title, what: "отклики", obj: "источник" };
+  const k = INSRC[s.name] ?? { tile: ic("inbox"), head: () => s.title, what: "отклики", obj: "источник" };
   const bad = s.recent.filter((e) => e.state === "error" && today(e.at)).length;
   let sub, pill;
   if (!s.configured) {
@@ -1110,7 +1110,7 @@ function inRow(e, vt) {
   const fin = done
     ? `<a href="${href}" data-uclose>в «Разборе» ›</a>`
     : `<span class="${e.state === "error" ? "c-no" : "muted"}">${INSTATE[e.state] ?? ""}</span>`;
-  return `<div class="inrow"><span class="muted num">${hm(e.at)}</span><span>${esc(SRC[e.source]?.short ?? e.source)}</span><span class="ell" title="${esc(what)}">${esc(what || "—")}</span><span class="muted ell">${esc(vac)}</span>${fin}</div>`;
+  return `<div class="inrow"><span class="muted num">${hm(e.at)}</span><span>${esc(INSRC[e.source]?.short ?? e.source)}</span><span class="ell" title="${esc(what)}">${esc(what || "—")}</span><span class="muted ell">${esc(vac)}</span>${fin}</div>`;
 }
 
 function openInbox() {

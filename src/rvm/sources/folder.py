@@ -1,10 +1,12 @@
 """Источник «папка» (RVM_INBOX_DIR): выгрузка с hh, правило почтового клиента, сканер.
 
 Забираются обычные файлы верхнего уровня, кроме скрытых (`.`) и временных (`~$…`, `….part`);
-папки и символические ссылки пропускаются. Файл больше лимита пачки — сразу в `error/`.
+папки и символические ссылки пропускаются; файл, изменённый меньше SETTLE_S секунд назад (ещё
+дописывается), ждёт следующего опроса. Файл больше лимита пачки — сразу в `error/`.
 За опрос — не больше POLL_ITEMS файлов и POLL_BYTES байт, остальное — в следующий опрос. После разбора файл переносится в `done/` (всё прочитано и оценено) или `error/`
 (ошибка чтения или оценки) внутри папки; при совпадении имени к нему добавляется префикс.
-ref = имя + размер + время изменения: файл с тем же именем, но новым содержимым забирается снова.
+ref = имя + размер + время изменения: файл с тем же именем, но новым содержимым забирается снова;
+копия уже забранного (тот же ref, не в разборе) переносится в `done/` с пометкой «уже забран».
 
 Вакансия отклика: имя `<id вакансии>__<имя>.docx` (например `3__Иванов.docx`) — отклик на
 открытую вакансию 3, резюме сохранится как `Иванов.docx`. Нет префикса или вакансия не открыта —
@@ -14,6 +16,7 @@ ref = имя + размер + время изменения: файл с тем 
 import logging
 import os
 import stat
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -24,6 +27,8 @@ from rvm.sources.base import POLL_BYTES, POLL_ITEMS, Fetched, Item
 
 log = logging.getLogger("rvm.sources")
 DONE, ERROR = "done", "error"
+SETTLE_S = 10
+_pending: set[tuple[str, str]] = set()  # (папка, ref) в разборе — не трогать до done()
 
 
 def _temporary(name: str) -> bool:
@@ -54,9 +59,17 @@ def fetch(
             continue
         if not stat.S_ISREG(st.st_mode):  # папки, символические ссылки, устройства
             continue
+        if time.time() - st.st_mtime < SETTLE_S:
+            continue  # ещё дописывается
         ref = f"{p.name}|{st.st_size}|{st.st_mtime_ns}"
         if seen(ref):
-            continue  # ещё разбирается
+            if (str(root), ref) not in _pending:  # копия уже забранного — не лежать вечно
+                try:
+                    _move(p, DONE)
+                except OSError:
+                    continue
+                skipped.append((ref, f"{p.name}: уже забран"))
+            continue
         if len(items) >= POLL_ITEMS or (items and used + st.st_size > POLL_BYTES):
             break
         try:  # ссылку, подложенную после lstat, не открываем; FIFO не ждём
@@ -78,11 +91,13 @@ def fetch(
         applied = vid if sep and rest and vid in vacancies else None
         items.append(Item(ref, rest if applied else p.name, data, applied))
         paths[ref] = p
+        _pending.add((str(root), ref))
 
     def done(item: Item, ok: bool) -> None:
+        _pending.discard((str(root), item.ref))
         try:
             _move(paths[item.ref], DONE if ok else ERROR)
-        except OSError as e:
-            log.warning("папка: файл не перенесён: %s", e)
+        except OSError as e:  # без пути: в логе только имя файла
+            log.warning("папка: файл %s не перенесён: %s", paths[item.ref].name, e.strerror)
 
     return Fetched(items, skipped, done=done)

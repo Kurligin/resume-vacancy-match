@@ -1,11 +1,14 @@
-"""Источник «почта» (IMAP): непрочитанные письма с вложениями-резюме.
+"""Источник «почта» (IMAP): письма за последние SINCE_DAYS дней с вложениями-резюме.
 
 RVM_IMAP_HOST, RVM_IMAP_USER, RVM_IMAP_PASSWORD; RVM_IMAP_FOLDER (INBOX), RVM_IMAP_SSL (1 —
-IMAP4_SSL, 0 — IMAP4), RVM_IMAP_PORT (993 / 143). Письма читаются без отметки «прочитано»
-(BODY.PEEK); флаг \\Seen ставится после постановки вложений в очередь. Письмо без подходящих
-вложений остаётся непрочитанным и учитывается один раз как «пропущено».
-ref = Message-ID (без него — uid:<UID>). Письмо больше MAX_MAIL_BYTES (RFC822.SIZE до скачивания)
-пропускается с причиной; вложения одного письма — одна пачка с общими лимитами. За опрос — не
+IMAP4_SSL, 0 — IMAP4), RVM_IMAP_PORT (993 / 143). ref = Message-ID (без него — uid:<UID>).
+Что уже забрано, решает только source_seen, а не флаг \\Seen: поиск — SINCE, а не UNSEEN.
+Поэтому письмо, разбор которого прервала остановка сервиса (forget_seen), заберётся снова, хотя
+уже помечено прочитанным, а письмо, которое человек открыл раньше сервиса, не пропадёт.
+Письма читаются без отметки «прочитано» (BODY.PEEK); \\Seen ставится после постановки вложений
+в очередь — только как подсказка человеку в почтовом клиенте. Письмо без подходящих вложений
+остаётся непрочитанным и учитывается один раз как «пропущено». Письмо больше MAX_MAIL_BYTES
+(RFC822.SIZE до скачивания) пропускается с причиной; вложения одного письма — одна пачка с общими лимитами. За опрос — не
 больше POLL_ITEMS вложений и POLL_BYTES байт писем, остальное — в следующий опрос.
 Вакансия отклика: название открытой вакансии (без регистра) в теме письма — так приходят
 уведомления hh и сайта; подходят несколько — самое длинное название.
@@ -15,6 +18,7 @@ import email
 import imaplib
 import re
 from collections.abc import Callable, Mapping
+from datetime import date, timedelta
 from email import policy
 from email.message import EmailMessage, Message
 from typing import Any, cast
@@ -23,6 +27,9 @@ from rvm.ingest import SUFFIXES, limits
 from rvm.sources.base import POLL_BYTES, POLL_ITEMS, Fetched, Item
 
 TIMEOUT_S = 30
+SINCE_DAYS = 14  # сервис простоял дольше — письма старше придётся загрузить вручную
+# месяцы IMAP-даты — не через strftime, чтобы не зависеть от локали
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 MAX_MAIL_BYTES = limits.MAX_REQUEST_BYTES  # сырой размер письма (вложения в base64)
 
 
@@ -71,7 +78,10 @@ def fetch(
     used = 0
     m = _connect(env)
     try:
-        typ, data = m.uid("SEARCH", "UNSEEN")
+        d = date.today() - timedelta(days=SINCE_DAYS)
+        # shortcut: заголовки каждого письма окна запрашиваются каждый опрос (по запросу на письмо);
+        # при сотнях писем в день — сузить окно или помнить последний UID
+        typ, data = m.uid("SEARCH", "SINCE", f"{d.day}-{_MONTHS[d.month - 1]}-{d.year}")
         if typ != "OK":
             raise imaplib.IMAP4.error(f"поиск писем: {data}")
         for uid in data[0].split():
@@ -106,8 +116,6 @@ def fetch(
         m.logout()
 
     def queued(refs: list[str]) -> None:
-        # shortcut: письмо, поставленное в очередь, но не отмеченное из-за сбоя здесь, остаётся
-        # непрочитанным и уже не забирается (ref в source_seen) — разбирать вручную
         conn = _connect(env)
         try:
             for ref in dict.fromkeys(refs):

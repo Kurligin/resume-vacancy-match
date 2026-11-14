@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from rvm import store
-from rvm.ingest import load_text
+from rvm.ingest import limits, load_text
 from rvm.sources import REGISTRY, Inbox, Item, hh
 
 TOKEN = "fake-hh-token-0123"
@@ -49,6 +49,7 @@ class Env:
         self.handler: Handler = hh_api
         client = httpx.Client(transport=httpx.MockTransport(self.route))
         monkeypatch.setattr(httpx, "get", client.get)
+        monkeypatch.setattr(httpx, "stream", client.stream)
         monkeypatch.setattr(hh, "PAUSE_S", 0)
         source = next(s for s in REGISTRY if s.name == "hh")
         self.inbox = Inbox(
@@ -94,7 +95,8 @@ def test_hh_unauthorized(env: Env) -> None:
     env.handler = lambda r: httpx.Response(401, json={"errors": [{"type": "oauth"}]})
     env.inbox.check("hh")
     error = env.state()["last_error"]
-    assert "RVM_HH_TOKEN" in error and TOKEN not in error and env.taken == []
+    assert "нужен новый ключ доступа" in error and "RVM_" not in error
+    assert TOKEN not in error and env.taken == []
 
 
 def test_hh_rate_limit_stops_poll(env: Env) -> None:
@@ -125,3 +127,35 @@ def test_hh_poll_limit(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
     assert [i.ref for i in env.taken] == ["hh:n1"] and env.state()["last_error"] == ""
     env.inbox.check("hh")
     assert [i.ref for i in env.taken] == ["hh:n1", "hh:n2"]
+
+
+def test_hh_download_https_redirects_and_stream_limit(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    RESPONSES["111"] = [negotiation(f"n{i}", f"r{i}") for i in range(1, 5)]
+    RESPONSES["111"][0]["resume"]["actions"]["download"]["pdf"]["url"] = "http://hh.ru/r1.pdf"
+    monkeypatch.setattr(limits, "MAX_BYTES", len(PDF))
+
+    def api(request: httpx.Request) -> httpx.Response:
+        rid = request.url.path.split("/")[2] if request.url.host == "hh.ru" else ""
+        if rid == "r2":  # на поддомен hh по https — следуем
+            return httpx.Response(302, headers={"location": "https://files.hh.ru/r2.pdf"})
+        if rid == "r3":  # наружу — пропуск отклика, опрос продолжается
+            return httpx.Response(302, headers={"location": "https://evil.example/r3.pdf"})
+        if rid == "r4":  # больше лимита — читаем потоком и бросаем
+            return httpx.Response(200, content=iter([PDF, b"x"]))
+        if request.url.host == "files.hh.ru":
+            return httpx.Response(200, content=PDF)
+        return hh_api(request)
+
+    env.handler = api
+    try:
+        env.inbox.check("hh")
+    finally:
+        RESPONSES["111"] = [negotiation("n1", "r1"), negotiation("n2", "r2")]
+    assert env.state()["last_error"] == ""
+    assert [(i.ref, i.data) for i in env.taken] == [("hh:n2", PDF)]
+    why = {e["message"] for e in env.state()["recent"] if e["state"] == "skipped"}
+    assert why == {"отклик без ссылки на резюме hh.ru", "резюме по ссылке вне hh.ru",
+                   f"резюме больше {len(PDF) // 2**20} МБ"}  # fmt: skip
+    assert not any(u.startswith("http://") or "evil" in u for u in env.requests)
