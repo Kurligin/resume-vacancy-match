@@ -1490,11 +1490,11 @@ function enter(user) {
   $("#mename").textContent = user.name;
   for (const el of document.querySelectorAll("[data-rec]")) el.hidden = mgr();
   const r = route();
+  // счётчик «Кандидаты» сразу после входа (пустой адрес ведёт в «Разбор», не в список кандидатов)
+  if (!mgr() && (!location.hash || r.name !== "base")) api("/api/stats").then((s) => ($("#navbadge").textContent = s.waiting || "")).catch(() => {});
   if (mgr() && !location.hash.startsWith("#/candidates")) return go("#/candidates");
   if (!mgr() && !location.hash) return go("#/triage");
   if (r.name !== "triage" && !mgr()) api("/api/triage?limit=1").then((t) => ($("#trbadge").textContent = triLeft(t) || "")).catch(() => {});
-  // счётчик «Кандидаты» сразу после входа, а не только после открытия раздела
-  if (r.name !== "base" && !mgr()) api("/api/stats").then((s) => ($("#navbadge").textContent = s.waiting || "")).catch(() => {});
   render();
 }
 
