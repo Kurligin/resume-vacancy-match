@@ -374,3 +374,83 @@ def test_set_status_with_comment(db: Path) -> None:
     )
     ev = store.card(db, a.candidate_id)["events"][-1]
     assert ev["details"] == {"from": "new", "to": "cust_rejected", "comment": "нет"}
+
+
+def test_list_filters_page_and_vacancy_counters(db: Path) -> None:
+    v1 = store.add_vacancy(db, doc("Python", name="py.docx"))
+    v2 = store.add_vacancy(db, doc("Аналитик", name="an.docx"))
+    plan = [  # отклик, статусы по v1 и v2 → лучшая вакансия — где «выполнено»
+        (v1, Status.FULL, Status.NO),  # c0: отклик v1, лучшая v1
+        (v1, Status.NO, Status.FULL),  # c1: отклик v1, лучшая v2
+        (v2, Status.FULL, Status.NO),  # c2: отклик v2, лучшая v1
+    ]
+    ids = []
+    for i, (applied, s1, s2) in enumerate(plan):
+        d = doc(f"резюме {i}", name=f"{i}.docx")
+        a = store.add_resume(db, f"r{i}".encode(), d, masked(d, [f"h{i}"]))
+        rep = report(d.name, {v1: {"r1": s1}, v2: {"r1": s2}}, applied=applied)
+        store.save_report(db, a.resume_id, rep)
+        ids.append(a.candidate_id)
+    d = doc("без разбора", name="x.docx")
+    ids.append(store.add_resume(db, b"r3", d, masked(d, ["h3"]), source="hh").candidate_id)
+    c0, c1, c2, c3 = ids
+    store.set_statuses(db, [c0], store.CandidateStatus.CUST, vacancy_id=v1)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE candidates SET created_at='2026-01-01T00:00:00+00:00' WHERE id=?", (c0,)
+        )
+
+    def got(**kw: object) -> set[int]:
+        return {c["id"] for c in store.list_candidates(db, **kw)}  # type: ignore[arg-type]
+
+    assert got(vacancy=v1) == {c0, c1, c2}
+    assert got(vacancy=v2) == {c1, c2}
+    assert got(vacancy=v2, verdicts=["fit"]) == {c1}  # вердикт — по выбранной вакансии
+    assert got(verdicts=["fit"]) == {c0, c1, c2}  # без вакансии — по лучшей
+    assert got(vacancy=v2, verdicts=["no_fit", "partial"]) == {c2}
+    assert got(verdicts=["no_fit", "partial"]) == set()
+    assert got(source="hh") == {c3}
+    assert got(since="2026-06-01") == {c1, c2, c3}
+    assert got(status=store.CandidateStatus.CUST) == {c0}
+    assert store.count_candidates(db, vacancy=v1) == 3
+    assert store.count_candidates(db, source="hh") == 1
+
+    by_date = [c["id"] for c in store.list_candidates(db, sort="date")]
+    assert by_date[-1] == c0
+    page = store.list_candidates(db, sort="date", limit=2, offset=1)
+    assert [c["id"] for c in page] == by_date[1:3]
+    assert store.list_candidates(db, limit=2, offset=10) == []
+    assert store.count_candidates(db) == 4
+
+    # сводка одним запросом — лучшая вакансия последней версии
+    s = store.summaries(db)
+    assert (s[c1]["best_vacancy"], s[c2]["best_vacancy"], s[c3]["best_vacancy"]) == (v2, v1, None)
+    assert s[c1]["best_title"] == f"Вакансия {v2}" and s[c1]["best_vacancy_score"] is not None
+
+    vac = {v["id"]: v for v in store.list_vacancies(db)}
+    assert {k: vac[v1][k] for k in ("applied", "waiting", "fit", "to_customer")} == {
+        "applied": 2,
+        "waiting": 1,  # c0 уже у заказчика
+        "fit": 2,
+        "to_customer": 1,
+    }
+    assert {k: vac[v2][k] for k in ("applied", "waiting", "fit", "to_customer")} == {
+        "applied": 1,
+        "waiting": 1,
+        "fit": 1,
+        "to_customer": 0,
+    }
+
+
+def test_migration_from_v2_adds_indexes(tmp_path: Path) -> None:
+    path = tmp_path / "v2.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript("".join(store.db._MIGRATIONS[:2]) + "PRAGMA user_version=2;")
+        conn.execute("INSERT INTO candidates (id, created_at, source) VALUES (3, 'x', 'файл')")
+    store.init(path)
+    store.init(path)
+    with sqlite3.connect(path) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.db._MIGRATIONS)
+    assert {"candidates_status_created", "candidates_created"} <= names
+    assert [c["id"] for c in store.list_candidates(path, source="файл")] == [3]
