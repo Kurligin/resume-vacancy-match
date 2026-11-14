@@ -912,8 +912,10 @@ async function confirmed(kind) {
   }
 }
 
-const uploadTabs = (res) =>
-  `<div class="seg"><button aria-pressed="${res}" data-upload="res">${ic("user", "i-sm")}Резюме</button><button aria-pressed="${!res}" data-upload="vac">${ic("brief", "i-sm")}Вакансии</button></div>`;
+const uploadTabs = (cur) =>
+  `<div class="seg">${[["res", "user", "Резюме"], ["vac", "brief", "Вакансии"], ["inbox", "inbox", "Входящие"]]
+    .map(([k, i, t]) => `<button aria-pressed="${k === cur}" data-upload="${k}">${ic(i, "i-sm")}${t}</button>`)
+    .join("")}</div>`;
 
 // файлы из выбора и перетаскивания; onPick(files)
 function dropZone(d, onPick) {
@@ -933,10 +935,11 @@ function dropZone(d, onPick) {
 
 async function openUpload(tab) {
   if (tab === "vac") return openVacUpload();
+  if (tab === "inbox") return openInbox();
   const d = modal(
     "upload",
     `<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
-   ${uploadTabs(true)}
+   ${uploadTabs("res")}
    <label class="drop" id="drop"><input type="file" id="files" multiple hidden accept=".docx,.doc,.pdf,.rtf,.txt,.odt,.html,.htm,.jpg,.jpeg,.png,.heic,.webp,.tif,.tiff,.zip"><div class="di">${ic("upload")}</div><b>Перетащите резюме или выберите файлы</b><small>одно, пачка или zip · docx, pdf, rtf, txt, doc, сканы jpg и png</small><div class="files" id="picked"></div></label>
    <label class="fld" style="margin-top:8px"><span>Отклик</span><select class="sel" id="applied" aria-label="Отклик на вакансию"><option value="">не указано</option></select></label>
    <div class="hint" style="display:flex;gap:6px;align-items:center">${ic("eyeoff", "i-sm")}ФИО, контакты, пол и возраст скрываются до анализа. Повторное резюме того же человека попадёт в его карточку.</div>
@@ -980,7 +983,7 @@ function openVacUpload() {
   const d = modal(
     "upload",
     `<div class="sheet" role="dialog" aria-label="Загрузка"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
-   ${uploadTabs(false)}
+   ${uploadTabs("vac")}
    <label class="drop" id="drop"><input type="file" id="files" multiple hidden accept=".docx,.doc,.pdf,.rtf,.txt,.odt,.html,.htm"><div class="di">${ic("file")}</div><b>Перетащите файл вакансии или выберите</b><small>docx, pdf, rtf, txt</small><div class="files" id="picked"></div></label>
    <textarea class="ed" id="vtext" style="min-height:90px" aria-label="Текст вакансии" placeholder="или вставьте текст вакансии"></textarea>
    <div class="or">или</div>
@@ -1055,6 +1058,109 @@ function openVacUpload() {
     const n = ids.length;
     toast(`${n > 1 ? `Добавлено ${n} ${plural(n, "вакансия", "вакансии", "вакансий")}` : "Вакансия добавлена"} · сверяем с резервом${errs.length ? `. Не добавлено: ${errs.join("; ")}` : ""}`);
   });
+}
+
+/* ---------- «Входящие»: отклики из почты, папки и hh ---------- */
+
+// слова для людей: без настроек, путей и кодов ошибок
+const SRC = {
+  mail: { tile: ic("mail"), short: "почта", head: (s) => `Почта${s.account ? ` · ${s.account}` : ""}`, what: "письма с резюме", obj: "почту" },
+  hh: { tile: "<b>hh</b>", short: "hh", head: () => "hh.ru · отклики на вакансии МФТИ", what: "отклики с hh", obj: "отклики с hh.ru" },
+  folder: { tile: ic("folder"), short: "папка", head: () => "Общая папка «Резюме»", what: "резюме из общей папки", obj: "общую папку" },
+};
+const INSTATE = { queued: "в очереди", reading: "разбирается…", error: "файл не открылся", skipped: "пропущено" };
+const ago = (iso) => {
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "только что" : m < 60 ? `${m} мин назад` : m < 24 * 60 ? `${Math.floor(m / 60)} ч назад` : stamp(iso);
+};
+const hm = (iso) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const today = (iso) => new Date(iso).toDateString() === new Date().toDateString();
+let inboxTimer;
+
+function srcRow(s) {
+  const k = SRC[s.name] ?? { tile: ic("inbox"), head: () => s.title, what: "отклики", obj: "источник" };
+  const bad = s.recent.filter((e) => e.state === "error" && today(e.at)).length;
+  let sub, pill;
+  if (!s.configured) {
+    sub = `Чтобы ${k.what} приходили сами, обратитесь к техническому специалисту.`;
+    pill = ["не подключено", "p-rev"];
+  } else if (s.last_error) {
+    sub = `Не удалось проверить ${k.obj}. Если повторяется — обратитесь к техническому специалисту.`;
+    pill = ["ошибка", "p-rej"];
+  } else {
+    sub = [
+      s.running ? "проверяем…" : s.last_check ? `проверено ${ago(s.last_check)}` : "ещё не проверяли",
+      `сегодня ${s.today_items} резюме`,
+      s.today_skipped && `пропущено: ${s.today_skipped}`,
+      bad && `${bad} ${plural(bad, "файл не открылся", "файла не открылись", "файлов не открылись")}`,
+    ].filter(Boolean).join(" · ");
+    pill = bad ? [`${bad} ${plural(bad, "ошибка", "ошибки", "ошибок")}`, "v-mid"] : ["подключено", "p-inv"];
+  }
+  const btn = s.configured
+    ? `<button class="btn btn-ghost" data-scheck="${esc(s.name)}" ${s.running ? "disabled" : ""}>${s.running ? "проверяем…" : "Проверить сейчас"}</button>`
+    : "";
+  return `<div class="srow"><span class="tile src-${esc(s.name)}">${k.tile}</span><span class="sm"><b>${esc(k.head(s))}</b><small>${esc(sub)}</small></span><span class="pill ${pill[1]}">${pill[0]}</span>${btn}</div>`;
+}
+
+function inRow(e, vt) {
+  const done = e.state === "done";
+  const href = e.candidate_id ? `#/candidates/${e.candidate_id}` : "#/triage";
+  const what = e.state === "skipped" ? e.message : e.name;
+  const vac = e.state === "skipped" ? "—" : e.vacancy ? (vt[e.vacancy] ?? "—") : "без вакансии";
+  const fin = done
+    ? `<a href="${href}" data-uclose>в «Разборе» ›</a>`
+    : `<span class="${e.state === "error" ? "c-no" : "muted"}">${INSTATE[e.state] ?? ""}</span>`;
+  return `<div class="inrow"><span class="muted num">${hm(e.at)}</span><span>${esc(SRC[e.source]?.short ?? e.source)}</span><span class="ell" title="${esc(what)}">${esc(what || "—")}</span><span class="muted ell">${esc(vac)}</span>${fin}</div>`;
+}
+
+function openInbox() {
+  modal(
+    "upload",
+    `<div class="sheet" role="dialog" aria-label="Загрузка" id="inbox"><h3>${ic("upload", "c-acc i-lg")}Загрузить</h3>
+   ${uploadTabs("inbox")}
+   <div id="inbody"><div class="stub">${ic("clock")}Загружаем…</div></div>
+   <div class="actions"><button class="btn btn-ghost" data-uclose>Закрыть</button></div></div>`,
+  );
+  fillInbox();
+}
+
+// перерисовать содержимое вкладки, пока окно открыто; во время проверки и разбора — каждые 2 с
+async function fillInbox() {
+  clearTimeout(inboxTimer);
+  let list;
+  const vt = {};
+  try {
+    [list] = await Promise.all([
+      api("/api/sources"),
+      api("/api/vacancies").then((vs) => vs.forEach((v) => (vt[v.id] = v.is_open ? v.title : v.title + " · закрыта")), () => {}),
+    ]);
+  } catch {
+    list = null;
+  }
+  const box = $("#inbody");
+  if (!box) return;
+  if (!list) return (box.innerHTML = `<div class="state err">${ic("alert")}Не удалось загрузить данные. Обновите страницу.</div>`);
+  const every = Math.round(list[0]?.every_minutes ?? 0);
+  const recent = list.flatMap((s) => s.recent).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+  box.innerHTML = `
+   <p class="inlead">Отклики забираются сами${every ? ` раз в ${every} ${plural(every, "минуту", "минуты", "минут")}` : ""} и идут в «Разбор». ФИО и контакты скрываются до анализа, как при ручной загрузке.</p>
+   <div class="srcs">${list.map(srcRow).join("")}</div>
+   <b class="inh">Последние поступления</b>
+   ${recent.length ? `<div class="inlist">${recent.map((e) => inRow(e, vt)).join("")}</div>` : `<div class="stub">${ic("inbox")}Пока ничего не пришло</div>`}`;
+  if (list.some((s) => s.running) || recent.some((e) => e.state === "queued" || e.state === "reading"))
+    inboxTimer = setTimeout(fillInbox, 2000);
+}
+
+async function checkSource(btn) {
+  btn.disabled = true;
+  btn.textContent = "проверяем…";
+  try {
+    await api(`/api/sources/${encodeURIComponent(btn.dataset.scheck)}/check`, { method: "POST" });
+  } catch {
+    toast("Проверить не получилось. Если повторяется — обратитесь к техническому специалисту.");
+  }
+  clearTimeout(inboxTimer);
+  inboxTimer = setTimeout(fillInbox, 2000);
 }
 
 async function managerDecide(kind) {
@@ -1191,6 +1297,7 @@ document.addEventListener("click", async (e) => {
     e.preventDefault();
     openReply(+el.dataset.reply);
   } else if ((el = on("[data-upload]"))) openUpload(el.dataset.upload || (route().name === "vacancies" ? "vac" : "res"));
+  else if ((el = on("[data-scheck]"))) checkSource(el);
   else if ((el = on("[data-vclose]"))) openVacClose(el.dataset.vclose);
   else if ((el = on("[data-vclosed]"))) closeVac(el.dataset.vclosed);
   else if ((el = on("[data-confirm]"))) openConfirm(el.dataset.confirm);

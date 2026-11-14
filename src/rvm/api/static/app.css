@@ -420,3 +420,21 @@ label.drop{display:block;cursor:pointer}
   border-radius:16px;padding:12px 12px 12px 18px;box-shadow:0 8px 30px rgba(0,0,0,.18);font-size:15px;animation:fade .2s}
 .tour-inv .btn{height:36px}
 @media (max-width:600px){.tour-inv{left:12px;right:12px;bottom:12px;flex-wrap:wrap}}
+
+/* «Загрузить → Входящие» */
+.inlead{margin-top:12px;font-size:13px;color:var(--fg2)}
+.srcs{margin-top:12px;border:1px solid var(--line);border-radius:14px}
+.srow{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
+.srow:first-child{border-top:0}
+.srow .tile{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent)}
+.srow .src-hh{background:var(--no-bg);color:var(--no);font-size:13px}
+.srow .src-folder{background:#f2f2f5;color:var(--fg2)}
+.srow .sm{flex:1 1 240px;min-width:0}
+.srow .sm b{display:block;overflow-wrap:anywhere}
+.srow .sm small{display:block;color:var(--fg2);font-size:12px}
+.inh{display:block;margin-top:16px;font-size:14px}
+.inlist{margin-top:6px;font-size:13px}
+.inrow{display:grid;grid-template-columns:44px 48px minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+.inrow a{color:var(--accent);white-space:nowrap}
+.muted{color:var(--fg2)}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
