@@ -15,6 +15,7 @@ class SourceEntry(BaseModel):
     name: str  # файлы пачки через запятую; пусто — пропуск или кандидат удалён
     vacancy: str | None  # id вакансии отклика
     batch_id: str | None  # пачка в /api/uploads/{id}
+    candidate_id: int | None  # первый кандидат пачки, когда разобран
     state: str  # queued / reading / done / error / skipped
     message: str
 
@@ -22,6 +23,8 @@ class SourceEntry(BaseModel):
 class SourceState(BaseModel):
     name: str
     title: str
+    account: str  # адрес ящика для показа (без пароля); пусто — нет
+    every_minutes: float  # период фонового опроса; 0 — опрос не запущен
     configured: bool
     needs: list[str]  # какие переменные окружения задать, если не настроен
     running: bool

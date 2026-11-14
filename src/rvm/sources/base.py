@@ -41,3 +41,4 @@ class Source(NamedTuple):
     source: str  # пишется в candidates.source, как «файл» у ручной загрузки
     needs: tuple[str, ...]  # обязательные переменные окружения
     fetch: Fetch
+    account: str = ""  # переменная окружения с адресом для показа людям (не секрет)

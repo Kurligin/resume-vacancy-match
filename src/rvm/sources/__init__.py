@@ -29,6 +29,7 @@ REGISTRY = [
         "почта",
         ("RVM_IMAP_HOST", "RVM_IMAP_USER", "RVM_IMAP_PASSWORD"),
         mail.fetch,
+        "RVM_IMAP_USER",
     ),
     Source("hh", "hh.ru", "hh", ("RVM_HH_TOKEN",), hh.fetch),
     Source("folder", "Папка", "папка", ("RVM_INBOX_DIR",), folder.fetch),
@@ -85,6 +86,7 @@ class Inbox:
             for s in sources
         }
         self.stop = threading.Event()
+        self.minutes = 0.0  # период фонового опроса; 0 — опрос не запущен
 
     def missing(self, name: str) -> list[str]:
         return [k for k in self.sources[name].needs if not self.env.get(k)]
@@ -97,6 +99,7 @@ class Inbox:
 
     def start(self, minutes: float) -> None:
         """Фоновый опрос настроенных источников: сразу и раз в minutes."""
+        self.minutes = minutes
 
         def loop() -> None:
             while True:
@@ -193,6 +196,8 @@ class Inbox:
                 {
                     "name": name,
                     "title": s.title,
+                    "account": self.env.get(s.account, "") if s.account else "",
+                    "every_minutes": self.minutes,
                     "configured": not self.missing(name),
                     "needs": self.missing(name),
                     "running": self.running(name),
@@ -207,9 +212,11 @@ class Inbox:
 
     def _live(self, e: dict[str, Any]) -> dict[str, Any]:
         if not e["batch_id"]:
-            return {**e, "name": ""}
+            return {**e, "name": "", "candidate_id": None}
         files = self.files(e["batch_id"]) or []
         states = {f.state for f in files}
         state = next((x for x in ("error", "reading", "queued") if x in states), "done")
         message = "; ".join(f.message for f in files if f.state == "error")
-        return {**e, "name": ", ".join(f.name for f in files), "state": state, "message": message}
+        cid = next((f.candidate_id for f in files if f.candidate_id), None)
+        return {**e, "name": ", ".join(f.name for f in files), "state": state, "message": message,
+                "candidate_id": cid}  # fmt: skip

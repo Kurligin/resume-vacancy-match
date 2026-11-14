@@ -245,6 +245,8 @@ def test_mail(tmp_path: Path, imap: type[FakeIMAP]) -> None:
 
         (cand,) = api.get("/api/candidates").json()
         assert cand["source"] == "почта"
+        assert got["done"]["candidate_id"] == cand["id"] and got["skipped"]["candidate_id"] is None
+        assert mail["account"] == "hr"  # логин ящика — для подписи «Почта · …», без пароля
         assert (
             api.get("/api/evaluations", params={"candidate": cand["id"]}).json()["applied"] == vid
         )
@@ -303,6 +305,7 @@ def test_sources_api(tmp_path: Path) -> None:
         mail = next(s for s in body if s["name"] == "mail")
         assert mail["needs"] == ["RVM_IMAP_HOST", "RVM_IMAP_USER", "RVM_IMAP_PASSWORD"]
         assert mail["recent"] == [] and mail["last_check"] is None
+        assert mail["account"] == "" and mail["every_minutes"] == 0  # опрос в тестах выключен
         assert api.post("/api/sources/mail/check").status_code == 409
         assert api.post("/api/sources/нет/check").status_code == 404
         no_csrf = TestClient(app, base_url="http://localhost", cookies=api.cookies)
