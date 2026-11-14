@@ -1,8 +1,9 @@
 """Запуск в контейнере: ключи по умолчанию, демо-данные в пустую базу, затем `rvm serve`.
 
 RVM_HASH_SALT и RVM_SECRET не заданы — генерируются один раз и хранятся в <var>/keys.env.
-RVM_SEED=1 — при пустой базе загрузить вакансии и резюме из RVM_DEMO_DIR (по умолчанию
+RVM_SEED=1 — в базу без кандидатов загрузить вакансии и резюме из RVM_DEMO_DIR (по умолчанию
 data/demo): в имени файла «ваканс» — вакансия, остальное — отклики на первую вакансию.
+Засев, упавший на резюме, догружает их при следующем старте (метка <база>.seeding).
 data/demo/cache.sqlite (ответы модели живого прогона) копируется в кэш, если его ещё нет."""
 
 import logging
@@ -55,10 +56,14 @@ def copy_cache(demo: Path, cache: Path) -> None:
 
 
 def seed(db: Path, demo: Path, cache: Path) -> bool:
-    """Загрузить демо-данные, если в базе нет вакансий. True — загрузили."""
+    """Демо-данные: вакансии — если их нет, резюме — если нет кандидатов. Вакансии без метки
+    недоконченного засева — свои: в такую базу резюме не грузим. True — загрузили."""
     store.init(db)
-    if store.list_vacancies(db):
+    pending = db.with_name(db.name + ".seeding")
+    have = [v["id"] for v in store.list_vacancies(db)]
+    if store.list_candidates(db) or (have and not pending.exists()):
         return False
+    pending.touch()
     files = sorted(
         p
         for p in demo.iterdir()
@@ -83,11 +88,12 @@ def seed(db: Path, demo: Path, cache: Path) -> bool:
         headers={"X-Requested-With": "rvm-seed"},
         cookies={auth.COOKIE: auth.issue(secret, auth.demo_user("recruiter"))},
     ) as api:
-        ids = []
-        for p in vacancies:
-            r = api.post("/api/vacancies", files={"file": (p.name, p.read_bytes())})
-            r.raise_for_status()
-            ids.append(r.json()["id"])
+        ids = list(have)  # вакансии прошлого, упавшего засева
+        if not have:
+            for p in vacancies:
+                r = api.post("/api/vacancies", files={"file": (p.name, p.read_bytes())})
+                r.raise_for_status()
+                ids.append(r.json()["id"])
         if resumes:
             up = [("files", (p.name, p.read_bytes())) for p in resumes]
             r = api.post("/api/uploads", files=up, params={"applied": ids[0]} if ids else {})
@@ -101,7 +107,8 @@ def seed(db: Path, demo: Path, cache: Path) -> bool:
                 time.sleep(0.2)
             for f in states:
                 log.warning("демо-резюме %s: %s %s", f["name"], f["state"], f["message"] or "")
-    log.warning("демо-данные загружены: %d вакансий, %d резюме", len(vacancies), len(resumes))
+    pending.unlink()
+    log.warning("демо-данные загружены: %d вакансий, %d резюме", len(ids) - len(have), len(resumes))
     return True
 
 
