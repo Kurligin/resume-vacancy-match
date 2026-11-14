@@ -1,9 +1,25 @@
 """Числа балла и рейтинга — все в одном месте, подбор порогов позже."""
 
+import logging
 import os
+from collections.abc import Callable
 from zoneinfo import ZoneInfo
 
 from rvm.models import Section, Status
+
+log = logging.getLogger(__name__)
+
+
+def _env[T](name: str, default: str, parse: Callable[[str], T]) -> T:
+    """Пустое значение — по умолчанию; неверное — предупреждение в лог и тоже по умолчанию."""
+    raw = os.environ.get(name, "").strip()
+    if raw:
+        try:
+            return parse(raw)
+        except (ValueError, KeyError) as e:  # ZoneInfoNotFoundError — подкласс KeyError
+            log.warning("%s=%r не подходит (%s), беру %s", name, raw, e, default)
+    return parse(default)
+
 
 WEIGHTS: dict[Section, float] = {
     Section.MUST: 3.0,
@@ -30,6 +46,6 @@ TRIAGE_NEAR = 5.0  # балл в ± от порога вердикта — «н�
 SPOT_EVERY = 10  # из стольких «явно не подходят» одна — на выборочную проверку
 
 # «Сводка»: сколько дней отклик может ждать разбора
-SLA_DAYS = int(os.environ.get("RVM_SLA_DAYS", "2"))
+SLA_DAYS = _env("RVM_SLA_DAYS", "2", int)
 # пояс календарных дней «Сводки»: не зависит от TZ контейнера
-TZ = ZoneInfo(os.environ.get("RVM_TZ", "Europe/Moscow"))
+TZ = _env("RVM_TZ", "Europe/Moscow", ZoneInfo)

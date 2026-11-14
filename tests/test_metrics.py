@@ -278,3 +278,25 @@ def test_today_in_rvm_tz(
     monkeypatch.setattr("rvm.scoring.config.TZ", ZoneInfo("UTC"))
     d = dashboard(db, 1, None, late)
     assert d.today.isoformat() == "2026-11-14" and d.by_source == {"файл": 1, "почта": 1}
+
+
+def test_env_empty_or_bad_falls_back(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from rvm.scoring.config import _env
+
+    monkeypatch.setenv("RVM_SLA_DAYS", "")
+    monkeypatch.setenv("RVM_TZ", " ")
+    assert _env("RVM_SLA_DAYS", "2", int) == 2
+    assert _env("RVM_TZ", "Europe/Moscow", ZoneInfo) == ZoneInfo("Europe/Moscow")
+    assert not caplog.records  # пустое — молча по умолчанию
+    monkeypatch.setenv("RVM_SLA_DAYS", "два")
+    monkeypatch.setenv("RVM_TZ", "Марс/Олимп")
+    assert _env("RVM_SLA_DAYS", "2", int) == 2
+    assert _env("RVM_TZ", "Europe/Moscow", ZoneInfo) == ZoneInfo("Europe/Moscow")
+    assert [r.levelname for r in caplog.records] == ["WARNING", "WARNING"]
+    assert "RVM_TZ" in caplog.records[1].getMessage()
+    monkeypatch.setenv("RVM_SLA_DAYS", "5")
+    monkeypatch.setenv("RVM_TZ", "UTC")
+    assert _env("RVM_SLA_DAYS", "2", int) == 5
+    assert _env("RVM_TZ", "Europe/Moscow", ZoneInfo) == ZoneInfo("UTC")
