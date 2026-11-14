@@ -398,7 +398,7 @@ def test_upload_limits_before_unpack(api: TestClient, monkeypatch: pytest.Monkey
     (f,) = wait_batch(api, upload(api, [("p.zip", zip_of({"big.txt": b"x" * 200}))]))
     assert f["state"] == "error" and "big.txt" in f["message"]
 
-    monkeypatch.setattr("rvm.api.app.MAX_REQUEST_BYTES", 150)
+    monkeypatch.setattr("rvm.ingest.limits.MAX_REQUEST_BYTES", 150)
     two = [("1.zip", zip_of({"a.txt": b"x" * 80})), ("2.zip", zip_of({"b.txt": b"x" * 80}))]
     r = api.post("/api/uploads", files=[("files", f) for f in two])
     assert r.status_code == 413  # распакованный объём запроса — по заявленным размерам

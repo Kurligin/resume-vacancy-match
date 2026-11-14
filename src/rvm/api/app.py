@@ -7,13 +7,14 @@
 import hashlib
 import io
 import logging
+import math
 import os
 import secrets
 import threading
 import uuid
 import zipfile
-from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import AsyncIterator, Callable, Iterable
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from importlib.metadata import version
@@ -36,7 +37,7 @@ from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rvm import store
-from rvm.api import auth, dashboard, hh, package, triage
+from rvm.api import auth, dashboard, hh, package, sources, triage
 from rvm.api.auth import Anyone, Manager, Recruiter
 from rvm.ingest import limits, load_bytes, load_text
 from rvm.llm import LLMClient
@@ -45,10 +46,10 @@ from rvm.models import Document, Status
 from rvm.pipeline.analyze import Report, ReportStatus, ResumeView, VacancyResult, analyze
 from rvm.privacy import mask
 from rvm.scoring import PairScore, Verdict
+from rvm.sources import Inbox, Item
 from rvm.store import CandidateStatus
 
 MAX_BATCH = 300  # файлов в одной пачке
-MAX_REQUEST_BYTES = 200 * 2**20  # распакованный объём одного запроса на загрузку
 OPEN_PATHS = {"/api/health", "/api/login", "/api/login-options"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # скрипты — только свои файлы; inline-стили в разметке интерфейса допустимы
@@ -232,7 +233,7 @@ def names_sent(card: dict[str, Any]) -> bool:
 
 
 def _too_big() -> HTTPException:
-    return HTTPException(413, f"в запросе больше {MAX_REQUEST_BYTES // 2**20} МБ")
+    return HTTPException(413, f"в запросе больше {limits.MAX_REQUEST_BYTES // 2**20} МБ")
 
 
 def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
@@ -263,12 +264,37 @@ def _unpack(name: str, data: bytes, budget: int) -> list[tuple[str, bytes]]:
         raise ValueError(f"{name}: архив не прочитан: {e}") from e
 
 
+def unpack_all(
+    files: Iterable[tuple[str, int, Callable[[], bytes]]],
+) -> list[tuple[UploadFileState, bytes]]:
+    """(имя, сырой размер, чтение) → файлы пачки; zip раскрываются, битый архив — строка с
+    ошибкой. Объём и число файлов сверх лимитов — HTTPException 413."""
+    items: list[tuple[UploadFileState, bytes]] = []
+    used = 0
+    for name, size, read in files:
+        if size > limits.MAX_REQUEST_BYTES - used:  # сырой размер — до чтения
+            raise _too_big()
+        try:
+            parts = _unpack(name, read(), limits.MAX_REQUEST_BYTES - used)
+        except ValueError as e:
+            items.append((UploadFileState(name=name, state="error", message=str(e)), b""))
+            continue
+        used += sum(len(d) for _, d in parts)
+        if used > limits.MAX_REQUEST_BYTES:
+            raise _too_big()
+        items += [(UploadFileState(name=n, state="queued"), d) for n, d in parts]
+        if len(items) > MAX_BATCH:
+            raise HTTPException(413, f"в пачке больше {MAX_BATCH} файлов")
+    return items
+
+
 def create_app(
     db: Path | None = None, llm: LLMClient | None = None, today: date | None = None
 ) -> FastAPI:
     """Настройки по умолчанию из окружения: RVM_DB, RVM_TODAY, LLM_* (как у клиента модели),
     RVM_SECRET (подпись сессий), RVM_ALLOWED_HOSTS (домены стенда через запятую),
-    RVM_DEMO_LOGIN=1 (вход по роли без пароля), RVM_PASSWORD_<ЛОГИН> (хэши паролей)."""
+    RVM_DEMO_LOGIN=1 (вход по роли без пароля), RVM_PASSWORD_<ЛОГИН> (хэши паролей),
+    RVM_POLL_MINUTES (опрос источников откликов, 0 — выключен) и переменные источников."""
     env = os.environ
     db = db or Path(env.get("RVM_DB", "var/rvm.sqlite"))
     store.init(db)
@@ -310,7 +336,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        raw = env.get("RVM_POLL_MINUTES") or "5"
+        try:
+            minutes = float(raw)
+            if not math.isfinite(minutes):
+                raise ValueError(raw)
+        except ValueError:
+            log.warning("RVM_POLL_MINUTES=%r — не число, опрос раз в 5 минут", raw)
+            minutes = 5.0
+        if 0 < minutes < 1:
+            minutes = 1.0  # чаще раза в минуту почту и hh не дёргаем
+        if minutes > 0 and inbox.configured():
+            inbox.start(minutes)
         yield
+        inbox.stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
         sweeps.shutdown(wait=True, cancel_futures=True)
 
@@ -345,20 +384,20 @@ def create_app(
             for k, v in kw.items():
                 setattr(f, k, v)
 
-    def process(f: UploadFileState, data: bytes, applied: str | None) -> None:
+    def process(f: UploadFileState, data: bytes, applied: str | None, source: str) -> None:
         with lock:
             # shortcut: блокировки не удаляются — по строке на уникальный файл за жизнь процесса
             mine = same_file.setdefault(hashlib.sha256(data).hexdigest(), threading.Lock())
         with mine:
-            read(f, data, applied)
+            read(f, data, applied, source)
 
-    def read(f: UploadFileState, data: bytes, applied: str | None) -> None:
+    def read(f: UploadFileState, data: bytes, applied: str | None, source: str) -> None:
         set_file(f, state="reading")
         try:
             doc = load_bytes(f.name, data)
             if not doc.lines:
                 raise ValueError("; ".join(doc.warnings) or f"файл не прочитан: {doc.status}")
-            added = store.add_resume(db, data, doc, mask(doc, f.name))
+            added = store.add_resume(db, data, doc, mask(doc, f.name), source=source)
             set_file(f, candidate_id=added.candidate_id)
             if not added.new:
                 try:
@@ -415,6 +454,44 @@ def create_app(
         with lock:
             files = batches.get(batch_id)
             return None if files is None else [f.candidate_id for f in files if f.candidate_id]
+
+    def enqueue(
+        items: list[tuple[UploadFileState, bytes]], applied: str | None, source: str
+    ) -> tuple[str, list[Future[None]]]:
+        """Пачка в /api/uploads/{id} и разбор её файлов в очереди — общий путь загрузки и
+        источников откликов."""
+        bid = uuid.uuid4().hex
+        with lock:
+            batches[bid] = [f for f, _ in items]
+        jobs = [
+            pool.submit(process, f, data, applied, source)
+            for f, data in items
+            if f.state == "queued"
+        ]
+        return bid, jobs
+
+    def take(group: list[Item], source: str) -> tuple[str, list[Future[None]]]:
+        """Элементы с общим ref (вложения одного письма) — одна пачка с общими лимитами."""
+        try:
+            items = unpack_all([(it.name, len(it.data), lambda it=it: it.data) for it in group])
+        except HTTPException as e:
+            items = [
+                (UploadFileState(name=it.name, state="error", message=str(e.detail)), b"")
+                for it in group
+            ]
+        if not items:  # пустой архив: в error/, а не тихо в done/
+            items = [
+                (UploadFileState(name=it.name, state="error", message="в архиве нет резюме"), b"")
+                for it in group
+            ]
+        return enqueue(items, group[0].applied, source)
+
+    def batch_files(batch_id: str) -> list[UploadFileState] | None:
+        with lock:
+            files = batches.get(batch_id)
+            return None if files is None else [f.model_copy() for f in files]
+
+    inbox = Inbox(db, take, batch_files, now)
 
     def start_reserve(vid: str) -> None:
         reserve[vid] = {"state": "running", "checked": 0, "matches": []}
@@ -494,37 +571,16 @@ def create_app(
         _: Recruiter,
         applied: Annotated[str | None, Query(description="id вакансии отклика")] = None,
     ) -> BatchCreated:
-        items: list[tuple[UploadFileState, bytes]] = []
-        used = 0
-        for up in files:
-            name = up.filename or "файл"
-            if (up.size or 0) > MAX_REQUEST_BYTES - used:  # сырой размер — до чтения
-                raise _too_big()
-            try:
-                parts = _unpack(name, up.file.read(), MAX_REQUEST_BYTES - used)
-            except ValueError as e:
-                items.append((UploadFileState(name=name, state="error", message=str(e)), b""))
-                continue
-            used += sum(len(d) for _, d in parts)
-            if used > MAX_REQUEST_BYTES:
-                raise _too_big()
-            items += [(UploadFileState(name=n, state="queued"), d) for n, d in parts]
-            if len(items) > MAX_BATCH:
-                raise HTTPException(413, f"в пачке больше {MAX_BATCH} файлов")
-        bid = uuid.uuid4().hex
-        with lock:
-            batches[bid] = [f for f, _ in items]
-        for f, data in items:
-            if f.state == "queued":
-                pool.submit(process, f, data, applied)
+        items = unpack_all((up.filename or "файл", up.size or 0, up.file.read) for up in files)
+        bid, _ = enqueue(items, applied, "файл")
         return BatchCreated(batch_id=bid, files=len(items))
 
     @app.get("/api/uploads/{batch_id}", summary="Прогресс пачки по файлам")
     def batch(batch_id: str, _: Recruiter) -> Batch:
-        with lock:
-            if batch_id not in batches:
-                raise HTTPException(404, "нет такой пачки")
-            return Batch(batch_id=batch_id, files=[f.model_copy() for f in batches[batch_id]])
+        files = batch_files(batch_id)
+        if files is None:
+            raise HTTPException(404, "нет такой пачки")
+        return Batch(batch_id=batch_id, files=files)
 
     # --- вакансии ---
 
@@ -797,5 +853,6 @@ def create_app(
     app.include_router(dashboard.router(db, llm.usage_path))
     app.include_router(package.router(db))
     app.include_router(hh.router(db, start_reserve))
+    app.include_router(sources.router(inbox))
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
