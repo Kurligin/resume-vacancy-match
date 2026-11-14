@@ -338,3 +338,23 @@ def test_hh_forbidden(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hh, "fetch_json", fetch)
     r = api.get("/api/vacancies/hh")
     assert r.status_code == 502 and "загрузка с hh не настроена на сервере" in r.json()["detail"]
+
+
+def test_triage_limit_keeps_totals_and_spot(api: TestClient, db: Path) -> None:
+    nofit = [seed(db, i, report(20, verdict=Verdict.NO_FIT)) for i in range(3)]
+    seed(db, 9, report(85))
+    t = triage(api, limit="1")
+    assert t["totals"] == {"need": 0, "fit": 1, "nofit": 3}
+    assert [it["id"] for it in t["nofit"]] == nofit[:1] and t["nofit"][0]["spot_check"]
+    full = triage(api)
+    assert len(full["nofit"]) == 3 and full["totals"]["nofit"] == 3
+    assert full["nofit"][0] == t["nofit"][0]  # с limit и без — те же карточки
+
+
+def test_redirect_names_vacancy_from_base(api: TestClient, db: Path) -> None:
+    rep = report(90, redirect=True)
+    assert rep.redirect is not None
+    rep.redirect.from_vacancy = "1"  # вакансия есть в базе — в причине её название, а не номер
+    cid = seed(db, 1, rep)
+    why = next(it for it in triage(api)["need"] if it["id"] == cid)["why"]
+    assert why[0] == "откликнулся на «Вакансия 1», лучше подходит «Вакансия 1»"

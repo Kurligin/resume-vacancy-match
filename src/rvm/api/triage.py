@@ -3,14 +3,14 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rvm import store
 from rvm.api.auth import Recruiter
-from rvm.pipeline.analyze import Report, ReportStatus, VacancyResult
+from rvm.pipeline.analyze import ReportStatus, VacancyResult
 from rvm.pipeline.explain import Point
 from rvm.scoring import Verdict, config
 from rvm.store import CandidateStatus
@@ -55,6 +55,7 @@ class Triage(BaseModel):
     done: int  # уже с решением
     pending: int  # оценка ещё не готова
     check_file: int = 0  # обезличивание не прошло: нужна проверка файла
+    totals: dict[Bucket, int] = {}  # сколько в корзине всего (при limit в списке — первые)
 
 
 class DecideBody(BaseModel):
@@ -95,32 +96,30 @@ def _reasons(v: VacancyResult, points: list[Point] | None, good: bool) -> list[R
     ]
 
 
-def classify(rep: Report, disagreed: bool = False) -> tuple[Bucket, list[str], int]:
-    """Корзина, причины и предлагаемое решение по лучшей вакансии кандидата."""
-    v = rep.vacancies[0]
-    s, titles = v.score, {x.id: x.title for x in rep.vacancies}
+def classify(b: store.Brief, disagreed: bool = False) -> tuple[Bucket, list[str], int]:
+    """Корзина, причины и предлагаемое решение по лучшей вакансии кандидата (b.vacancy_id есть)."""
+    assert b.score is not None and b.low is not None and b.high is not None
+    verdict = Verdict(b.verdict)
     need = []
     if disagreed:
         need.append("вы не согласились с «не подходит» на выборочной проверке")
-    if s.high - s.low > config.TRIAGE_WIDE:
-        need.append(f"широкая вилка {s.low:g}–{s.high:g}")
-    if any(abs(s.score - t) <= config.TRIAGE_NEAR for t in (config.FIT_FROM, config.PARTIAL_FROM)):
-        need.append(f"балл {s.score:g} у порога вердикта")
-    if rep.redirect:
-        src = titles.get(rep.redirect.from_vacancy, rep.redirect.from_vacancy)
-        need.append(f"откликнулся на «{src}», лучше подходит «{v.title}»")
-    disc = rep.facts.discrepancies if rep.facts else []
-    if any(f"D{i}" not in v.clarified for i in range(1, len(disc) + 1)):
+    if b.high - b.low > config.TRIAGE_WIDE:
+        need.append(f"широкая вилка {b.low:g}–{b.high:g}")
+    if any(abs(b.score - t) <= config.TRIAGE_NEAR for t in (config.FIT_FROM, config.PARTIAL_FROM)):
+        need.append(f"балл {b.score:g} у порога вердикта")
+    if b.redirect_from:
+        src = b.redirect_title or b.redirect_from
+        need.append(f"откликнулся на «{src}», лучше подходит «{b.title}»")
+    if any(f"D{i}" not in b.clarified for i in range(1, b.discrepancies + 1)):
         need.append("несостыковки в стаже")
     if need:
-        return "need", need, 2 if rep.redirect else _PROPOSE[v.verdict]
-    if v.verdict == Verdict.FIT and not s.blockers:
-        return "fit", [f"подходит: балл {s.score:g}, блокеров нет"], 1
-    if v.verdict == Verdict.NO_FIT or s.blockers:
-        text = {r.id: r.text for r in v.requirements}
-        why = [f"не выполнено обязательное: {text.get(b, b)}" for b in s.blockers]
-        return "nofit", why or [f"не подходит: балл {s.score:g}"], 4
-    return "need", [f"частичное совпадение, балл {s.score:g}"], _PROPOSE[v.verdict]
+        return "need", need, 2 if b.redirect_from else _PROPOSE[verdict]
+    if verdict == Verdict.FIT and not b.blockers:
+        return "fit", [f"подходит: балл {b.score:g}, блокеров нет"], 1
+    if verdict == Verdict.NO_FIT or b.blockers:
+        why = [f"не выполнено обязательное: {t}" for t in b.blockers]
+        return "nofit", why or [f"не подходит: балл {b.score:g}"], 4
+    return "need", [f"частичное совпадение, балл {b.score:g}"], _PROPOSE[verdict]
 
 
 def router(db: Path, batch_ids: Callable[[str], list[int] | None]) -> APIRouter:
@@ -132,9 +131,14 @@ def router(db: Path, batch_ids: Callable[[str], list[int] | None]) -> APIRouter:
         summary="Разбор потока: корзины кандидатов без решения",
         description="need — нужно решение (широкая вилка, балл у порога, переадресация, "
         "несостыковки), fit — явно подходят, nofit — явно не подходят; в nofit каждый "
-        f"{config.SPOT_EVERY}-й помечен spot_check. batch — только кандидаты пачки загрузки.",
+        f"{config.SPOT_EVERY}-й помечен spot_check. batch — только кандидаты пачки загрузки. "
+        "limit — не больше стольких в каждой корзине, сколько всего — в totals.",
     )
-    def triage(_: Recruiter, batch: str | None = None) -> Triage:
+    def triage(
+        _: Recruiter,
+        batch: str | None = None,
+        limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    ) -> Triage:
         ids = None
         if batch is not None:
             ids = batch_ids(batch)
@@ -142,44 +146,55 @@ def router(db: Path, batch_ids: Callable[[str], list[int] | None]) -> APIRouter:
                 raise HTTPException(404, "нет такой пачки")
         info = store.summaries(db, ids)
         spots = store.spot_answers(db)
+        undecided = [c["resume_id"] for c in info.values() if c["status"] in store.UNDECIDED]
+        # корзины — по колонкам и json_extract; полный отчёт — только для попавших в ответ
+        briefs = store.briefs(db, undecided)
         out = Triage(need=[], fit=[], nofit=[], done=0, pending=0)
+        found: dict[Bucket, list[tuple[int, list[str], int]]] = {"need": [], "fit": [], "nofit": []}
         for cid, c in sorted(info.items()):
             if c["status"] not in store.UNDECIDED:
                 out.done += 1
                 continue
-            try:
-                rep = store.load_report(db, c["resume_id"])
-            except KeyError:
-                rep = None
-            if rep is not None and rep.status == ReportStatus.PRIVACY_ERROR:
+            b = briefs.get(c["resume_id"])
+            if b is not None and b.status == ReportStatus.PRIVACY_ERROR:
                 out.check_file += 1
                 continue
-            if rep is None or not rep.vacancies:
+            if b is None or b.vacancy_id is None:
                 out.pending += 1
                 continue
-            bucket, why, proposed = classify(rep, spots.get(cid) is False)
-            v = rep.vacancies[0]
-            item = TriageItem(
-                id=cid,
-                bucket=bucket,
-                why=why,
-                position=c["position"],
-                vacancy_id=v.id,
-                title=v.title,
-                score=v.score.score,
-                low=v.score.low,
-                high=v.score.high,
-                verdict=v.verdict,
-                pros=_reasons(v, v.insights and v.insights.strengths, True),
-                cons=_reasons(v, v.insights and v.insights.risks, False),
-                proposed=proposed,
-            )
-            getattr(out, bucket).append(item)
+            bucket, why, proposed = classify(b, spots.get(cid) is False)
+            found[bucket].append((cid, why, proposed))
         # проверенные (и перенесённые несогласием в need) остаются в счёте — метка не кочует
-        counted = sorted([it.id for it in out.nofit] + [it.id for it in out.need if it.id in spots])
+        counted = sorted(
+            [x[0] for x in found["nofit"]] + [x[0] for x in found["need"] if x[0] in spots]
+        )
         marked = {cid for i, cid in enumerate(counted) if i % config.SPOT_EVERY == 0}
-        for item in out.nofit:
-            item.spot_check = item.id in marked and item.id not in spots
+        shown = {bk: rows[:limit] for bk, rows in found.items()}
+        reports = store.load_reports(
+            db, [info[x[0]]["resume_id"] for rows in shown.values() for x in rows], brief=True
+        )
+        for bucket, rows in shown.items():
+            out.totals[bucket] = len(found[bucket])
+            for cid, why, proposed in rows:
+                v = reports[info[cid]["resume_id"]].vacancies[0]
+                getattr(out, bucket).append(
+                    TriageItem(
+                        id=cid,
+                        bucket=bucket,
+                        why=why,
+                        position=info[cid]["position"],
+                        vacancy_id=v.id,
+                        title=v.title,
+                        score=v.score.score,
+                        low=v.score.low,
+                        high=v.score.high,
+                        verdict=v.verdict,
+                        pros=_reasons(v, v.insights and v.insights.strengths, True),
+                        cons=_reasons(v, v.insights and v.insights.risks, False),
+                        proposed=proposed,
+                        spot_check=bucket == "nofit" and cid in marked and cid not in spots,
+                    )
+                )
         return out
 
     @r.post("/api/triage/decide", summary="Решение по одному кандидату или пачкой")
