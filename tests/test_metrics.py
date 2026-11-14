@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 import test_api
@@ -121,7 +122,9 @@ def base(tmp_path: Path, clock: list[datetime]) -> Path:
         {"prompt_tokens": 7, "completion_tokens": 7},  # запись до метки времени
     ]
     usage = tmp_path / "usage.jsonl"
-    usage.write_text("\n".join(map(json.dumps, lines)) + '\n{"at": "2026-11-14', "utf-8")
+    usage.write_text(
+        "\n".join(map(json.dumps, lines)) + '\n[1, 2]\n"строка"\nnull\n{"at": "2026-11-14', "utf-8"
+    )
     assert f
     return db
 
@@ -229,3 +232,45 @@ def test_api_dashboard(app: FastAPI, api: TestClient) -> None:
     assert api.get("/api/dashboard", params={"days": 3}).status_code == 422
     with client(app, "manager") as m:
         assert m.get("/api/dashboard").status_code == 403
+
+
+def test_undo_not_counted(tmp_path: Path, clock: list[datetime]) -> None:
+    """«Отменить» в «Разборе» и на карточке: ни отмена, ни отменённое решение не считаются."""
+    db = tmp_path / "rvm.sqlite"
+    store.init(db)
+    S = store.CandidateStatus
+    clock[0] = at(13, 9)
+    a, _ = add(db, 1, "файл")
+    b, _ = add(db, 2, "файл")
+    clock[0] = at(13, 10)
+    store.set_status(db, a, S.CUST)
+    store.set_status(db, b, S.RESERVE)
+    clock[0] = at(13, 11)
+    store.set_status(db, a, S.NEW, undo=True)
+    store.set_status(db, b, S.NEW, undo=True)
+    d = dashboard(db, 7, None, NOW)
+    (v,) = d.vacancies
+    assert (v.reviewed, v.to_customer, v.customer_decided) == (0, 0, 0)
+    assert v.median_decision_days is None and v.median_customer_days is None
+    assert d.kept.total == 0 and d.queue.count == 2
+    clock[0] = at(13, 12)
+    store.set_status(db, a, S.REJECTED)  # решение после отмены — считается
+    v = dashboard(db, 7, None, NOW).vacancies[0]
+    assert v.reviewed == 1 and v.median_decision_days == 0.1
+
+
+def test_today_in_rvm_tz(
+    tmp_path: Path, clock: list[datetime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "rvm.sqlite"
+    store.init(db)
+    clock[0] = at(14, 20)  # 23:00 МСК 14.11
+    add(db, 1, "файл")
+    clock[0] = at(14, 21)  # 00:00 МСК 15.11
+    add(db, 2, "почта")
+    late = datetime(2026, 11, 14, 21, 30, tzinfo=UTC)  # по UTC ещё 14.11
+    d = dashboard(db, 1, None, late)
+    assert d.today.isoformat() == "2026-11-15" and d.by_source == {"почта": 1}
+    monkeypatch.setattr("rvm.scoring.config.TZ", ZoneInfo("UTC"))
+    d = dashboard(db, 1, None, late)
+    assert d.today.isoformat() == "2026-11-14" and d.by_source == {"файл": 1, "почта": 1}

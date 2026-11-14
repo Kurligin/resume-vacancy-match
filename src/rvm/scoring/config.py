@@ -1,6 +1,7 @@
 """Числа балла и рейтинга — все в одном месте, подбор порогов позже."""
 
 import os
+from zoneinfo import ZoneInfo
 
 from rvm.models import Section, Status
 
@@ -30,3 +31,5 @@ SPOT_EVERY = 10  # из стольких «явно не подходят» од
 
 # «Сводка»: сколько дней отклик может ждать разбора
 SLA_DAYS = int(os.environ.get("RVM_SLA_DAYS", "2"))
+# пояс календарных дней «Сводки»: не зависит от TZ контейнера
+TZ = ZoneInfo(os.environ.get("RVM_TZ", "Europe/Moscow"))

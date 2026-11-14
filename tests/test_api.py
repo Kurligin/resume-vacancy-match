@@ -156,8 +156,11 @@ def test_answer_status_delete(api: TestClient) -> None:
     assert [c["id"] for c in api.get("/api/candidates", params={"status": "reserve"}).json()] == [
         cid
     ]
+    assert api.patch(f"/api/candidates/{cid}", json={"status": "new", "undo": True}).is_success
     card = api.get(f"/api/candidates/{cid}").json()
     assert {e["type"] for e in card["events"]} >= {"uploaded", "evaluated", "answer", "status"}
+    moves = [e["details"] for e in card["events"] if e["type"] == "status"]
+    assert [m.get("undo") for m in moves] == [None, True]  # отмена помечена для «Сводки»
 
     assert api.delete(f"/api/candidates/{cid}").status_code == 204
     assert api.get(f"/api/candidates/{cid}").status_code == 404
@@ -500,6 +503,18 @@ def test_key_without_model_fails_at_start(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.delenv("LLM_MODE", raising=False)
     with pytest.raises(RuntimeError, match="LLM_MODEL"):
         create_app(db=tmp_path / "rvm.sqlite")
+
+
+def test_explicit_demo_mode_without_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("LLM_MODE", "demo")
+    monkeypatch.setenv("LLM_API_KEY", "x")  # ключ при demo не используется
+    monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.setenv("RVM_CACHE", str(tmp_path / "cache.sqlite"))
+    with TestClient(create_app(db=tmp_path / "rvm.sqlite"), base_url="http://localhost") as c:
+        assert c.get("/api/health").json()["mode"] == "demo"
+    assert "LLM_API_KEY не задан" not in caplog.text
 
 
 def test_delete_when_db_busy(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

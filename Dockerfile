@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 
-# OCR сканов и фото (рус + англ), чтение старых .doc; Ghostscript не ставим
+# OCR сканов и фото (рус + англ), чтение старых .doc, база поясов для RVM_TZ; Ghostscript не ставим
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng antiword \
+        tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng antiword tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv

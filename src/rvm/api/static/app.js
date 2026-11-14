@@ -377,7 +377,7 @@ const dlabel = (iso, short) => {
 };
 
 async function renderDash(r) {
-  if (!view.dash) $("#top").innerHTML = stateBox("load", "Собираем сводку…");
+  $("#top").innerHTML = stateBox("load", "Собираем сводку…"); // на каждом входе и смене периода
   let d;
   try {
     d = await api(`/api/dashboard?days=${r.days}`);
@@ -387,7 +387,6 @@ async function renderDash(r) {
   const now = route();
   if (now.name !== "dashboard" || now.days !== r.days) return; // пока ждали, ушли с экрана или сменили период
   $("#top").innerHTML = d instanceof Error ? failed(d) : topDash(d);
-  view.dash = true;
 }
 
 function topDash(d) {
@@ -821,7 +820,7 @@ async function decide(ids, a, vid) {
   toast(
     `${who} → ${PS[DEC2ST[a]][0]}`,
     async () => {
-      for (const [id, s] of prev) await setStatus(id, s);
+      for (const [id, s] of prev) await setStatus(id, s, true);
       renderTriage();
     },
     ["Показать в «Кандидатах»", () => go(`#/candidates/${ids[0]}`)],
@@ -980,8 +979,9 @@ function openConfirm(kind) {
   );
 }
 
-const setStatus = (id, status) =>
-  api(`/api/candidates/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+// undo — отмена решения кнопкой «Отменить»: «Сводка» не считает ни её, ни отменённое решение
+const setStatus = (id, status, undo = false) =>
+  api(`/api/candidates/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, undo }) });
 
 async function confirmed(kind) {
   const c = view.card;
@@ -992,7 +992,7 @@ async function confirmed(kind) {
       await setStatus(c.id, "reserve");
       render();
       toast(`${nameText(c.id)} в резерве`, async () => {
-        await setStatus(c.id, prev);
+        await setStatus(c.id, prev, true);
         render();
       }, ["Открыть резерв", () => { st.flt = "reserve"; go(`#/candidates/${c.id}`); }]);
     } else {

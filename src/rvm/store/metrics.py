@@ -2,13 +2,14 @@
 сортировки, модель. Только чтение базы и usage.jsonl, без вызовов модели.
 
 Определения:
-- период — days календарных дней по локальной дате сервера, включая сегодня (1 — сегодня);
+- период — days календарных дней по дате в поясе RVM_TZ (Europe/Moscow), включая сегодня;
 - отклик — карточка кандидата, созданная в период (candidates.created_at); источник —
   candidates.source; вакансия отклика — analysis.applied последней версии резюме (может быть
   угадана эвристикой; нет разбора — vacancy_id null). Удалённые карточки не считаются,
   склеенная считается по дате оставшейся;
-- разобрано — у кандидата было событие status (рекрутер принял решение);
-- ждут разбора — сейчас статус new/review; возраст — дни по локальной дате от отклика; дольше
+- разобрано — у кандидата было событие status (рекрутер принял решение); отмена кнопкой
+  «Отменить» (details.undo) снимает и себя, и отменённое ею решение — по всем показателям;
+- ждут разбора — сейчас статус new/review; возраст — дни по дате RVM_TZ от отклика; дольше
   SLA — возраст больше RVM_SLA_DAYS. Срез на сейчас, не за период;
 - передано заказчику — был переход в cust; решение заказчика — переход из cust в другой статус
   (кто бы ни поставил); ждут заказчика — сейчас cust, возраст — от последнего перехода в cust
@@ -138,6 +139,8 @@ def _usage(path: Path | None, start: str) -> tuple[int, int, int]:
             r = json.loads(ln)
         except ValueError:
             continue  # недописанная строка при падении процесса
+        if not isinstance(r, dict):
+            continue  # чужая строка: валидный JSON, но не запись
         if (r.get("at") or "") >= start:
             calls += 1
             prompt += r.get("prompt_tokens") or 0
@@ -147,7 +150,7 @@ def _usage(path: Path | None, start: str) -> tuple[int, int, int]:
 
 def dashboard(db: Path, days: int, usage: Path | None, now: datetime | None = None) -> Dashboard:
     """Цифры «Сводки» за days дней; определения — в docstring модуля."""
-    now = now or datetime.now().astimezone()  # локальное время сервера
+    now = (now or datetime.now(UTC)).astimezone(config.TZ)
     tz, today = now.tzinfo, now.date()
     since = today - timedelta(days=days - 1)
     # в базе UTC в isoformat: строки сравниваются в хронологическом порядке
@@ -164,7 +167,8 @@ def dashboard(db: Path, days: int, usage: Path | None, now: datetime | None = No
         ).fetchall()
         moves = conn.execute(
             "SELECT candidate_id AS cid, at, json_extract(details, '$.from') AS src,"
-            " json_extract(details, '$.to') AS dst FROM events WHERE type='status' ORDER BY id"
+            " json_extract(details, '$.to') AS dst, json_extract(details, '$.undo') AS undo"
+            " FROM events WHERE type='status' ORDER BY id"
         ).fetchall()
         spots = conn.execute(
             "SELECT candidate_id, json_extract(details, '$.agree') FROM events"
@@ -188,7 +192,14 @@ def dashboard(db: Path, days: int, usage: Path | None, now: datetime | None = No
     cust_last: dict[int, str] = {}
     cust_out: dict[int, str] = {}  # первое решение заказчика
     kept: dict[str, set[int]] = {s: set() for s in KEPT}
+    live: dict[int, list[sqlite3.Row]] = {}  # переходы без отменённых
     for m in moves:
+        ms = live.setdefault(m["cid"], [])
+        if not m["undo"]:
+            ms.append(m)
+        elif ms:
+            ms.pop()  # отмена снимает отменённое решение
+    for m in (m for ms in live.values() for m in ms):
         cid = m["cid"]
         first.setdefault(cid, m["at"])
         if m["dst"] == C.CUST and m["src"] != C.CUST:
