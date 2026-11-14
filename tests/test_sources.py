@@ -15,7 +15,9 @@ from fastapi.testclient import TestClient
 from test_api import EXTERNAL, SwitchFake, add_vacancy, client, resume, wait
 
 from rvm.api import create_app
+from rvm.ingest import limits
 from rvm.llm import LLMClient
+from rvm.sources import folder, mail
 
 VACANCY = "Python-разработчик\nТребования: Python"
 PASSWORD = "очень-секретный-пароль"
@@ -130,6 +132,30 @@ def test_folder_without_vacancy_prefix(tmp_path: Path, inbox: Path) -> None:
         assert entry["vacancy"] is None and entry["name"] == "999__резюме.txt"
 
 
+def test_folder_symlink_too_big_and_poll_limit(
+    tmp_path: Path, inbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "secret.txt"
+    outside.write_bytes(resume(4))
+    (inbox / "ссылка.txt").symlink_to(outside)
+    (inbox / "a.txt").write_bytes(resume(1))
+    (inbox / "b.txt").write_bytes(resume(2))
+    (inbox / "0-большой.txt").write_bytes(b"x" * 500)  # раньше a.txt по порядку
+    monkeypatch.setattr(limits, "MAX_REQUEST_BYTES", 400)
+    monkeypatch.setattr(folder, "POLL_ITEMS", 1)
+    with client(make_app(tmp_path), "recruiter") as api:
+        st = next(s for s in check(api, "folder") if s["name"] == "folder")
+        assert (st["today_items"], st["today_skipped"]) == (1, 1)  # лимит опроса: один файл
+        assert (inbox / "error" / "0-большой.txt").exists() and (inbox / "b.txt").exists()
+        st = next(s for s in check(api, "folder") if s["name"] == "folder")
+        assert (st["today_items"], st["today_skipped"]) == (2, 1)
+        skip = next(e for e in settled(api, "folder")["recent"] if e["state"] == "skipped")
+        assert "больше" in skip["message"]
+        check(api, "folder")
+        assert (inbox / "ссылка.txt").is_symlink() and outside.exists()  # ссылка не тронута
+        assert len(api.get("/api/candidates").json()) == 2
+
+
 # --- почта ---
 
 
@@ -156,6 +182,7 @@ class FakeIMAP:
     mails: ClassVar[dict[bytes, bytes]] = {}
     flagged: ClassVar[list[bytes]] = []
     opened: ClassVar[list[tuple[str, int]]] = []
+    fetched: ClassVar[list[tuple[bytes, str]]] = []
     fail: ClassVar[Exception | None] = None
 
     def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
@@ -174,7 +201,10 @@ class FakeIMAP:
         if cmd == "SEARCH":
             return "OK", [b" ".join(u for u in self.mails if u not in self.flagged)]
         if cmd == "FETCH":
-            return "OK", [(b"1 (UID " + args[0] + b" BODY[] {1}", self.mails[args[0]]), b")"]
+            mail = self.mails[args[0]]
+            self.fetched.append((args[0], args[1]))
+            size = b" RFC822.SIZE %d" % len(mail) if "RFC822.SIZE" in args[1] else b""
+            return "OK", [(b"1 (UID " + args[0] + size + b" BODY[] {1}", mail), b")"]
         assert cmd == "STORE" and args[1:] == ("+FLAGS", "(\\Seen)")
         self.flagged.append(args[0])
         return "OK", [b""]
@@ -197,7 +227,7 @@ def imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[FakeIMAP]]:
         b"1": eml("<a@x>", "Отклик на вакансию «PYTHON-разработчик»", docx_bytes()),
         b"2": eml("<b@x>", "Вопрос без резюме", None),
     }
-    FakeIMAP.flagged, FakeIMAP.opened, FakeIMAP.fail = [], [], None
+    FakeIMAP.flagged, FakeIMAP.opened, FakeIMAP.fetched, FakeIMAP.fail = [], [], [], None
     yield FakeIMAP
 
 
@@ -235,6 +265,27 @@ def test_mail_plain_port_and_error(
         assert "LOGIN failed" in st["last_error"] and st["today_items"] == 0
         assert PASSWORD not in api.get("/api/sources").text
         assert api.get("/api/health").status_code == 200  # сервис жив
+
+
+def test_mail_too_big_and_poll_limit(
+    tmp_path: Path, imap: type[FakeIMAP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imap.mails = {
+        b"1": eml("<a@x>", "Резюме", docx_bytes()),
+        b"2": eml("<b@x>", "Резюме", docx_bytes()),
+        b"3": eml("<c@x>", "Огромное", docx_bytes() + b"x" * 50_000),
+    }
+    monkeypatch.setattr(mail, "MAX_MAIL_BYTES", len(imap.mails[b"2"]) + 1000)
+    monkeypatch.setattr(mail, "POLL_ITEMS", 1)
+    with client(make_app(tmp_path), "recruiter") as api:
+        st = next(s for s in check(api, "mail") if s["name"] == "mail")
+        assert (st["today_items"], st["today_skipped"], imap.flagged) == (1, 0, [b"1"])
+        st = next(s for s in check(api, "mail") if s["name"] == "mail")
+        assert (st["today_items"], st["today_skipped"], imap.flagged) == (2, 1, [b"1", b"2"])
+        skip = next(e for e in st["recent"] if e["state"] == "skipped")
+        assert "письмо больше" in skip["message"]
+        assert (b"2", "(BODY.PEEK[])") in imap.fetched
+        assert (b"3", "(BODY.PEEK[])") not in imap.fetched  # большое письмо не скачивали
 
 
 # --- API ---

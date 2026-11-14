@@ -446,12 +446,16 @@ def create_app(
         ]
         return bid, jobs
 
-    def take(it: Item, source: str) -> tuple[str, list[Future[None]]]:
+    def take(group: list[Item], source: str) -> tuple[str, list[Future[None]]]:
+        """Элементы с общим ref (вложения одного письма) — одна пачка с общими лимитами."""
         try:
-            items = unpack_all([(it.name, len(it.data), lambda: it.data)])
+            items = unpack_all([(it.name, len(it.data), lambda it=it: it.data) for it in group])
         except HTTPException as e:
-            items = [(UploadFileState(name=it.name, state="error", message=str(e.detail)), b"")]
-        return enqueue(items, it.applied, source)
+            items = [
+                (UploadFileState(name=it.name, state="error", message=str(e.detail)), b"")
+                for it in group
+            ]
+        return enqueue(items, group[0].applied, source)
 
     def batch_files(batch_id: str) -> list[UploadFileState] | None:
         with lock:

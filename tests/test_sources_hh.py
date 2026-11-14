@@ -59,9 +59,9 @@ class Env:
         self.requests.append(str(request.url))
         return self.handler(request)
 
-    def take(self, it: Item, source: str) -> tuple[str, list[Any]]:
-        assert source == "hh"
-        self.taken.append(it)
+    def take(self, group: list[Item], source: str) -> tuple[str, list[Any]]:
+        assert source == "hh" and len(group) == 1
+        self.taken += group
         return f"b{len(self.taken)}", []
 
     def state(self) -> dict[str, Any]:

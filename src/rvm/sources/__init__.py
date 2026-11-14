@@ -36,8 +36,8 @@ REGISTRY = [
 RECENT = 20
 log = logging.getLogger("rvm.sources")
 
-# (элемент, значение candidates.source) → id пачки и задачи разбора её файлов
-Take = Callable[[Item, str], tuple[str, list[Future[Any]]]]
+# (элементы с общим ref, значение candidates.source) → id пачки и задачи разбора её файлов
+Take = Callable[[list[Item], str], tuple[str, list[Future[Any]]]]
 
 
 def _on_all(futures: list[Future[Any]], then: Callable[[], None]) -> None:
@@ -131,11 +131,17 @@ class Inbox:
             for ref, why in got.skipped:
                 st["today_skipped"] += 1
                 st["recent"].appendleft(self._entry(s.name, None, None, "skipped", why))
+            groups: dict[str, list[Item]] = {}  # вложения одного письма — одна пачка
             for it in got.items:
-                bid, futures = self.take(it, s.source)
-                st["today_items"] += 1
-                st["recent"].appendleft(self._entry(s.name, it.applied, bid))
-                _on_all(futures, lambda it=it, bid=bid, fs=futures: self._done(s, got, it, bid, fs))
+                groups.setdefault(it.ref, []).append(it)
+            for group in groups.values():
+                bid, futures = self.take(group, s.source)
+                st["today_items"] += len(group)
+                st["recent"].appendleft(self._entry(s.name, group[0].applied, bid))
+                _on_all(
+                    futures,
+                    lambda it=group[0], bid=bid, fs=futures: self._done(s, got, it, bid, fs),
+                )
             store.mark_seen(
                 self.db, s.name, [r for r, _ in got.skipped] + [i.ref for i in got.items]
             )
