@@ -28,6 +28,21 @@ services:
       - ollama:/root/.ollama
     restart: unless-stopped
 
+  # Почта для показа (GreenMail): SMTP mail:3025 и IMAP mail:3143 без TLS, порты наружу не
+  # публикуются — ящик виден только внутри сети compose, поэтому пароль по умолчанию «demo».
+  # Запуск со стеком (app получает RVM_IMAP_* из docker-compose.mail.yml):
+  #   docker compose -f docker-compose.yml -f docker-compose.mail.yml --profile mail up -d
+  # Демо-отклик: docker compose exec app python scripts/send_demo_mail.py \
+  #   "data/demo/Резюме А.txt" --vacancy "<название вакансии>"
+  mail:
+    image: greenmail/standalone:2.1.15
+    profiles: [mail]
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imap -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.users=hr:${RVM_DEMO_MAIL_PASSWORD:-demo}@rvm.local
+    restart: unless-stopped
+
 volumes:
   rvm-var:
   ollama:

@@ -15,7 +15,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
-COPY scripts/start.py ./scripts/start.py
+COPY scripts/start.py scripts/send_demo_mail.py ./scripts/
 COPY data/demo ./data/demo
 
 RUN useradd --create-home --uid 1000 rvm && mkdir -p var && chown rvm:rvm var

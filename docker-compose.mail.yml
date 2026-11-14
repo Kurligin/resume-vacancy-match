@@ -1,0 +1,13 @@
+# Источник «почта» для app — подключается вместе с профилем mail (см. сервис mail в docker-compose.yml):
+#   docker compose -f docker-compose.yml -f docker-compose.mail.yml --profile mail up -d
+services:
+  app:
+    environment:
+      RVM_IMAP_HOST: mail
+      RVM_IMAP_PORT: "3143"
+      RVM_IMAP_SSL: "0"
+      RVM_IMAP_USER: hr
+      RVM_IMAP_PASSWORD: ${RVM_DEMO_MAIL_PASSWORD:-demo}
+      RVM_IMAP_FOLDER: INBOX
+    depends_on:
+      - mail
