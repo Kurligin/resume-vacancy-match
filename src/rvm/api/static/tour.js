@@ -246,6 +246,7 @@ let role = "recruiter";
 let tick = null;
 let gen = 0; // номер показа: поздний ответ старого шага не трогает новый
 let shown = -1; // шаг, чья подсказка на экране; -1 — идёт переход. «Далее»/«Назад» действуют только от него
+let seen = -1; // последний показанный шаг: сценарий «пройден», только если его последний шаг был на экране
 let calm = 0; // до этого момента кнопки молчат: «Далее», нажатое для шага до автоперехода, не листает новый
 
 function mount() {
@@ -369,7 +370,7 @@ async function show(i, auto = false) {
   shown = -1;
   const prev = steps[st.i];
   if (prev && st.i !== i) prev.leave?.();
-  if (prev && i > st.i && prev.k === prev.n - 1) save(PASSED, [...new Set([...(load(PASSED) ?? []), prev.key])]);
+  if (prev && i > st.i && prev.k === prev.n - 1 && (seen === st.i || prev.optional)) save(PASSED, [...new Set([...(load(PASSED) ?? []), prev.key])]);
   st.i = i;
   st.back = back;
   save(KEY, st);
@@ -399,7 +400,7 @@ async function show(i, auto = false) {
     `<button class="btn btn-ghost" data-t="prev" ${i ? "" : "disabled"}>‹ Назад</button><button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">${last ? "Готово" : "Далее ›"}</button>`,
     (i + 1) / steps.length,
   );
-  shown = i;
+  shown = seen = i;
   if (auto) calm = Date.now() + 800;
   if (el) el.scrollIntoView({ block: "center", behavior: reduced() ? "auto" : "smooth" });
   place(el, hit(s));
@@ -457,6 +458,8 @@ async function switchRole(r) {
   } catch (e) {
     // тур уже закрыт (возврат роли из end) — окна нет, только сообщение
     if (!st) return note(`Тур закрыт, но вернуть роль не удалось (${e.message}). Выйдите и войдите заново.`);
+    // шаги кончились, роль не вернулась — итог всё равно показать, пропускать нечего
+    if (st.i >= steps.length) return finish(), note(`Вернуть роль не удалось (${e.message}). Выйдите и войдите заново.`);
     popup("Тур", "Не удалось сменить роль", `<p>${esc(e.message)}. Пропустите шаг или завершите тур.</p>`, `<button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">Пропустить шаг</button>`);
     shown = st.i;
     ui.d.classList.remove("busy");
