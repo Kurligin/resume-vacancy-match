@@ -4,6 +4,7 @@
 
 const KEY = "rvm-tour"; // sessionStorage: сценарии, шаг, выбранные кандидаты — переживают перезагрузку при смене роли
 const OFFERED = "rvm-tour-offered"; // localStorage: приглашение уже показывали
+const PASSED = "rvm-tour-passed"; // sessionStorage: ключи пройденных сценариев — отметка «✓ пройден» в меню
 const FROM = "со слов кандидата";
 const PAD = 6;
 const GAP = 12;
@@ -223,14 +224,16 @@ const SCENARIOS = [
 
 // шаг без своего адреса — на экране предыдущего шага сценария: так «Назад» возвращает на нужный экран.
 // Демо-вход отключён — шаги чужой роли выпадают (demo не задан у состояния старой версии — не фильтруем)
+// si — номер сценария в туре, k/n — номер шага внутри сценария и их число
 const stepsOf = (keys, ctx) =>
-  keys.flatMap((k) => {
-    const sc = SCENARIOS.find((s) => s.key === k);
+  keys.flatMap((key, si) => {
+    const sc = SCENARIOS.find((s) => s.key === key);
     let go = null;
-    return sc
+    const a = sc
       .steps(ctx)
-      .map((s) => ({ ...s, go: (go = s.go ?? go), sc: sc.title }))
+      .map((s) => ({ ...s, go: (go = s.go ?? go), sc: sc.title, key }))
       .filter((s) => ctx.demo !== false || (s.role ?? "recruiter") === ctx.role);
+    return a.map((s, k) => ({ ...s, si, k, n: a.length }));
   });
 const hit = (s) => !!(s?.act || s?.manual); // подсвеченный элемент кликабелен
 
@@ -242,6 +245,9 @@ let steps = [];
 let role = "recruiter";
 let tick = null;
 let gen = 0; // номер показа: поздний ответ старого шага не трогает новый
+let shown = -1; // шаг, чья подсказка на экране; -1 — идёт переход. «Далее»/«Назад» действуют только от него
+let seen = -1; // последний показанный шаг: сценарий «пройден», только если его последний шаг был на экране
+let calm = 0; // до этого момента кнопки молчат: «Далее», нажатое для шага до автоперехода, не листает новый
 
 function mount() {
   if (ui) return ui;
@@ -249,7 +255,7 @@ function mount() {
   d.className = "tour";
   d.innerHTML = `<div class="tour-catch"></div><div class="tour-hole"></div>
    <div class="tour-pop" role="dialog" aria-modal="true" aria-labelledby="tour-t" tabindex="-1">
-    <div class="tour-k"></div><h3 id="tour-t"></h3><div class="tour-x" aria-live="polite"></div><div class="tour-nav"></div></div>`;
+    <div class="tour-bar" aria-hidden="true"><i></i></div><div class="tour-k"></div><h3 id="tour-t"></h3><div class="tour-x" aria-live="polite"></div><div class="tour-nav"></div></div>`;
   document.body.appendChild(d);
   d.querySelector(".tour-catch").addEventListener("click", (e) => e.stopPropagation());
   d.querySelector(".tour-pop").addEventListener("click", onPop);
@@ -262,7 +268,7 @@ function onPop(e) {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.t === "next") next();
-  else if (b.dataset.t === "prev") show(st.i - 1);
+  else if (b.dataset.t === "prev") stepBack();
   else if (b.dataset.t === "end") end();
   else if (b.dataset.t === "menu") open();
   else if (b.dataset.sc) start(b.dataset.sc === "*" ? SCENARIOS.filter((s) => usable(s, st.ctx)).map((s) => s.key) : [b.dataset.sc]);
@@ -272,8 +278,9 @@ const NEED = { one: (c) => c.one, rd: (c) => c.rd, cmp: (c) => c.strong && c.par
 const need = (s, c) => !!NEED[s.key](c);
 const usable = (s, c) => need(s, c) && stepsOf([s.key], c).length > 0;
 
-function popup(kicker, title, html, nav) {
+function popup(kicker, title, html, nav, done = 0) {
   const { pop } = mount();
+  pop.querySelector(".tour-bar i").style.width = `${done * 100}%`;
   pop.querySelector(".tour-k").textContent = kicker;
   pop.querySelector("#tour-t").textContent = title;
   pop.querySelector(".tour-x").innerHTML = html;
@@ -356,16 +363,21 @@ const hashTo = (h) =>
         setTimeout(done, 400);
       });
 
-async function show(i) {
+async function show(i, auto = false) {
   if (i < 0) return;
   const back = st.i > i || (st.i === i && !!st.back); // направление переживает перезагрузку при смене роли
-  if (i >= steps.length) return end();
   const g = ++gen;
+  shown = -1;
   const prev = steps[st.i];
   if (prev && st.i !== i) prev.leave?.();
+  if (prev && i > st.i && prev.k === prev.n - 1 && (seen === st.i || prev.optional)) save(PASSED, [...new Set([...(load(PASSED) ?? []), prev.key])]);
   st.i = i;
   st.back = back;
   save(KEY, st);
+  if (i >= steps.length) {
+    const home = st.ctx?.role ?? "recruiter"; // итог показываем в той роли, с которой тур начали
+    return role !== home ? switchRole(home) : finish();
+  }
   const s = steps[i];
   if ((s.role ?? "recruiter") !== role) return switchRole(s.role ?? "recruiter");
   clearInterval(tick);
@@ -380,12 +392,16 @@ async function show(i) {
   const text = typeof s.text === "function" ? s.text() : s.text;
   const miss = el ? "" : `<p class="tour-miss">${esc(s.miss ?? "Этого элемента сейчас нет на экране — шаг показан без подсветки.")}</p>`;
   const last = i === steps.length - 1;
+  const many = steps[steps.length - 1].si > 0;
   popup(
-    `${s.sc} · шаг ${i + 1} из ${steps.length}`,
+    `${many ? `Сценарий ${s.si + 1} из ${steps[steps.length - 1].si + 1} · ш` : "Ш"}аг ${s.k + 1} из ${s.n}\n${s.sc}`,
     s.title,
     `<p>${esc(text)}</p>${miss}`,
     `<button class="btn btn-ghost" data-t="prev" ${i ? "" : "disabled"}>‹ Назад</button><button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">${last ? "Готово" : "Далее ›"}</button>`,
+    (i + 1) / steps.length,
   );
+  shown = seen = i;
+  if (auto) calm = Date.now() + 800;
   if (el) el.scrollIntoView({ block: "center", behavior: reduced() ? "auto" : "smooth" });
   place(el, hit(s));
   ui.pop.focus({ preventScroll: true });
@@ -395,13 +411,34 @@ async function show(i) {
     place(find(s.sel) ?? el, hit(s));
     if (!was && s.done?.()) {
       clearInterval(tick);
-      setTimeout(() => g === gen && show(i + 1), 500); // дать увидеть результат действия
+      setTimeout(() => g === gen && show(i + 1, true), 500); // дать увидеть результат действия
     }
   }, 250);
 }
 
+// итог после последнего шага: тур остановлен, сам заново не начинается
+function finish() {
+  save(KEY, null); // перезагрузка страницы итог не повторяет
+  save(OFFERED, 1, localStorage);
+  clearInterval(tick);
+  mount();
+  ui.d.classList.remove("busy");
+  const list = [...new Set(steps.map((s) => s.sc))].map((t) => `<li>✓ ${esc(t)}</li>`).join("");
+  popup("Готово", "Тур пройден", `<p>Пройдено сценариев: ${new Set(steps.map((s) => s.key)).size}.</p><ul class="tour-done">${list}</ul>`, `<button class="btn btn-ghost" data-t="end">Закрыть</button><button class="btn btn-primary" data-t="menu">К сценариям</button>`, 1);
+  place(null);
+  ui.pop.focus({ preventScroll: true });
+}
+
+// кнопки действуют от шага на экране: пока идёт переход (автопереход, загрузка, смена роли), повторное нажатие не перескакивает шаг
+function stepBack() {
+  if (shown > 0 && shown === st?.i && Date.now() >= calm) show(shown - 1);
+}
+
 async function next() {
-  const s = steps[st.i];
+  const i = shown;
+  if (i < 0 || i !== st?.i || Date.now() < calm) return;
+  shown = -1;
+  const s = steps[i];
   const g = gen;
   if (s?.act && !s.done?.()) {
     const el = find(s.sel);
@@ -410,7 +447,7 @@ async function next() {
       for (let k = 0; k < 15 && !s.done?.() && g === gen; k++) await sleep(200);
     }
   }
-  if (g === gen) show(st.i + 1);
+  if (g === gen) show(i + 1);
 }
 
 async function switchRole(r) {
@@ -421,7 +458,10 @@ async function switchRole(r) {
   } catch (e) {
     // тур уже закрыт (возврат роли из end) — окна нет, только сообщение
     if (!st) return note(`Тур закрыт, но вернуть роль не удалось (${e.message}). Выйдите и войдите заново.`);
+    // шаги кончились, роль не вернулась — итог всё равно показать, пропускать нечего
+    if (st.i >= steps.length) return finish(), note(`Вернуть роль не удалось (${e.message}). Выйдите и войдите заново.`);
     popup("Тур", "Не удалось сменить роль", `<p>${esc(e.message)}. Пропустите шаг или завершите тур.</p>`, `<button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">Пропустить шаг</button>`);
+    shown = st.i;
     ui.d.classList.remove("busy");
     place(null);
     ui.pop.focus({ preventScroll: true });
@@ -460,6 +500,7 @@ async function open() {
   mount();
   ui.d.classList.add("busy");
   st = { keys: [], i: -1, ctx: null };
+  save(OFFERED, 1, localStorage); // тур уже открывали — приглашение больше не нужно
   popup("Как это работает", "Сценарии работы", "<p>Подбираем кандидатов для примеров…</p>", "");
   place(null);
   try {
@@ -473,6 +514,7 @@ async function open() {
     return;
   }
   const any = SCENARIOS.some((s) => usable(s, st.ctx));
+  const passed = load(PASSED) ?? [];
   popup(
     "Как это работает",
     "Сценарии работы",
@@ -480,7 +522,7 @@ async function open() {
      <div class="tour-sc">${SCENARIOS.map((s, k) => {
        const ok = usable(s, st.ctx);
        const cut = ok && stepsOf([s.key], st.ctx).length < s.steps(st.ctx).length;
-       const why = !need(s, st.ctx) ? ["нет такого кандидата в базе"] : !ok ? ["нужен демо-вход по ролям, а он отключён"] : [cut && "без шагов другой роли: демо-вход отключён", s.writes && "меняет данные стенда"].filter(Boolean);
+       const why = !need(s, st.ctx) ? ["нет такого кандидата в базе"] : !ok ? ["нужен демо-вход по ролям, а он отключён"] : [passed.includes(s.key) && "✓ пройден", cut && "без шагов другой роли: демо-вход отключён", s.writes && "меняет данные стенда"].filter(Boolean);
        return `<button data-sc="${s.key}" ${ok ? "" : "disabled"}><b>${k + 1}. ${esc(s.title)}</b>${why.length ? `<small>${why.join(" · ")}</small>` : ""}</button>`;
      }).join("")}</div>`,
     `<button class="btn btn-ghost" data-t="end">Закрыть</button><button class="btn btn-primary" data-sc="*" ${any ? "" : "disabled"}>Весь тур ›</button>`,
@@ -552,7 +594,7 @@ addEventListener(
       else f[k < 0 ? (d > 0 ? 0 : f.length - 1) : (k + d + f.length) % f.length].focus();
     } else if (e.target.closest?.("input,textarea,select")) return;
     else if (st?.i >= 0 && e.key === "ArrowRight") next();
-    else if (st?.i >= 0 && e.key === "ArrowLeft") show(st.i - 1);
+    else if (st?.i >= 0 && e.key === "ArrowLeft") stepBack();
     else return e.stopImmediatePropagation(); // 1–4, Enter и прочее не уходят в «Разбор»; Enter на кнопке подсказки работает — действие по умолчанию не отменено
     e.preventDefault();
     e.stopImmediatePropagation();

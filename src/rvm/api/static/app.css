@@ -400,7 +400,10 @@ label.drop{display:block;cursor:pointer}
   box-shadow:0 12px 40px rgba(0,0,0,.25);pointer-events:auto;outline:none;transition:left .35s var(--spring,ease),top .35s var(--spring,ease),opacity .2s}
 .tour.busy .tour-pop{opacity:.6}
 .tour-pop:has(#tour-t:empty){visibility:hidden}
-.tour-k{font-size:12px;font-weight:600;color:var(--fg3);letter-spacing:.02em}
+.tour-k{font-size:12px;font-weight:600;color:var(--fg3);letter-spacing:.02em;white-space:pre-line}
+.tour-bar{height:3px;border-radius:2px;background:var(--line);margin:-6px 0 10px;overflow:hidden}
+.tour-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .35s var(--spring,ease)}
+.tour-done{margin:8px 0 0;padding:0;list-style:none;color:var(--fg2);font-size:14px;line-height:1.6}
 .tour-pop h3{font-size:18px;font-weight:600;margin:4px 0 6px}
 .tour-x p{color:var(--fg2);font-size:15px;line-height:1.45}
 .tour-x .tour-miss{margin-top:6px;font-size:13px;color:var(--fg3)}
