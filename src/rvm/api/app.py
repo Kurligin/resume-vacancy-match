@@ -36,7 +36,7 @@ from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rvm import store
-from rvm.api import auth, hh, package, triage
+from rvm.api import auth, dashboard, hh, package, triage
 from rvm.api.auth import Anyone, Manager, Recruiter
 from rvm.ingest import limits, load_bytes, load_text
 from rvm.llm import LLMClient
@@ -742,6 +742,7 @@ def create_app(
         return Health(mode=llm.mode, model=llm.model, version=version("rvm"))
 
     app.include_router(triage.router(db, batch_ids))
+    app.include_router(dashboard.router(db, llm.usage_path))
     app.include_router(package.router(db))
     app.include_router(hh.router(db, start_reserve))
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
