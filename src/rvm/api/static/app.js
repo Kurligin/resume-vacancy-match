@@ -47,7 +47,7 @@ const FLAG = {
 };
 const POLL_MS = 1500;
 
-const st = { me: null, bk: "need", ti: 0, packNames: false, pii: false, flt: "all", q: "", tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
+const st = { me: null, bk: "need", ti: 0, packNames: false, pii: false, vq: "", vclosed: false, tab: "req", from: null, batch: sessionStorage.getItem("rvm-batch") };
 let view = {}; // данные текущего экрана
 let poll = null;
 
@@ -88,13 +88,14 @@ const piiTog = () =>
 
 /* ---------- роутинг ---------- */
 
+// #/candidates/12?vacancy=3&verdict=fit,partial&p=2 — фильтр и страница списка живут в адресе
 function route() {
-  const p = location.hash.replace(/^#\/?/, "").split("/");
+  const [path, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
+  const p = path.split("/");
   if (p[0] === "candidates" && p[2] === "vacancy") return { name: "cand", id: +p[1], vid: p[3] ? decodeURIComponent(p[3]) : null };
-  if (p[0] === "candidates" && p[1]) return { name: "base", id: +p[1] };
   if (p[0] === "vacancies") return { name: "vacancies", vid: p[1] ? decodeURIComponent(p[1]) : null };
   if (p[0] === "triage") return { name: "triage" };
-  return { name: "base", id: null };
+  return { name: "base", id: p[0] === "candidates" && p[1] ? +p[1] : null, f: Object.fromEntries(new URLSearchParams(qs)) };
 }
 
 let prevHash = "";
@@ -136,68 +137,197 @@ async function render(scroll = false) {
 
 /* ---------- «Кандидаты» ---------- */
 
+const PAGE = 50;
+const FKEYS = ["q", "vacancy", "status", "verdict", "source", "days"]; // sort и p — не фильтр
+// значения source у кандидата (B2) и подписи для людей
+const SRC = { "файл": "загружен вручную", "почта": "почта", "папка": "папка", hh: "hh.ru" };
+const DAYS = [["", "за всё время"], ["1", "за сутки"], ["7", "за 7 дней"], ["30", "за 30 дней"]];
+const fhash = (f, id) => {
+  const s = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  return `#/candidates${id ? `/${id}` : ""}${s ? `?${s}` : ""}`;
+};
+// смена фильтра сбрасывает страницу и выбранную карточку; p в patch — переход по страницам
+const setF = (patch) => go(fhash({ ...route().f, p: "", ...patch }));
+const fActive = (f) => FKEYS.some((k) => f[k] && !(k === "status" && mgr())); // статус руководителя задаёт сервер
+let baseSeq = 0;
+
 async function renderBase(r) {
+  const f = r.f;
+  const seq = ++baseSeq; // ответ на устаревший фильтр (быстрый ввод) не рисуем
   if (!view.base) $("#top").innerHTML = stateBox("load", "Загружаем кандидатов…");
   try {
-    const q = `?pii=${st.pii}${st.q ? `&q=${encodeURIComponent(st.q)}` : ""}`;
-    const [list, vacs, stats] = await Promise.all([
-      api(`/api/candidates${q}`),
+    const qs = new URLSearchParams({ page: 1, limit: PAGE, offset: (Math.max(1, +f.p || 1) - 1) * PAGE, pii: st.pii });
+    for (const k of [...FKEYS, "sort"]) if (f[k] && !(k === "status" && mgr())) qs.set(k, f[k]);
+    const [page, vacs, stats, week] = await Promise.all([
+      api(`/api/candidates?${qs}`),
       api("/api/vacancies"),
       mgr() ? null : api("/api/stats"),
+      mgr() ? null : api("/api/candidates?page=1&limit=1&days=7"),
     ]);
-    remember(list);
-    view.base = { list, vacs, stats };
+    if (seq !== baseSeq || route().name !== "base") return; // ушли на другой экран или фильтр
+    remember(page.items);
+    view.base = { page, vacs, stats, week: week?.total ?? 0 };
   } catch (e) {
-    $("#top").innerHTML = failed(e);
+    st.ddOpen = st.focusQ = false;
+    if (seq !== baseSeq || route().name !== "base") return;
+    $("#top").innerHTML = failed(e) + (fActive(f) ? `<div class="state"><button class="btn btn-ghost" data-freset>Сбросить фильтры</button></div>` : "");
+    $("#doc").innerHTML = "";
     return;
   }
+  const key = JSON.stringify({ ...f, p: f.p || "" });
+  if (view.fkey !== key) {
+    view.fkey = key;
+    view.picked = new Set(); // выбор галочками — в пределах одной страницы одного фильтра
+  }
   $("#top").innerHTML = topBase();
+  drawPicked();
+  if (st.ddOpen) $("#top details.dd")?.setAttribute("open", "");
+  st.ddOpen = false;
+  if (st.focusQ) {
+    const q = $("#q");
+    q.focus();
+    q.setSelectionRange(q.value.length, q.value.length);
+    st.focusQ = false;
+  }
   renderQueue();
   if (st.batch && !poll) startPoll();
-  const sel = r.id ?? view.base.list[0]?.id;
+  const { page, stats } = view.base;
+  const sel = r.id ?? page.items[0]?.id;
   if (sel != null) renderCard(sel);
-  else $("#doc").innerHTML = mgr() ? "" : `<div class="stub" style="padding:18px">${ic("users")}Загрузите резюме — карточка кандидата появится здесь.</div>`;
-  $("#navbadge").textContent = mgr() ? view.base.list.length || "" : view.base.stats.waiting || "";
+  else $("#doc").innerHTML = mgr() || page.total || fActive(f) ? "" : `<div class="stub" style="padding:18px">${ic("users")}Загрузите резюме — карточка кандидата появится здесь.</div>`;
+  if (!mgr()) $("#navbadge").textContent = stats.waiting || "";
+  else if (!fActive(f)) $("#navbadge").textContent = page.total || "";
+}
+
+const opt = (v, t, cur) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(t)}</option>`;
+const fsel = (k, label, opts, cur = "") =>
+  `<label class="fsel ${cur ? "on" : ""}"><span>${label}:</span><select data-f="${k}" aria-label="${label}">${opts.map(([v, t]) => opt(v, t, cur)).join("")}</select></label>`;
+
+function filters(f) {
+  const { page, vacs, stats } = view.base;
+  const vs = (f.verdict || "").split(",").filter((v) => VERDICT[v]);
+  const by = stats?.by_status ?? {};
+  const vacOpts = [["", "все"], ...vacs.filter((v) => v.is_open || v.id === f.vacancy).map((v) => [v.id, v.title + (v.is_open ? "" : " (закрыта)")])];
+  const stOpts = [["", `все · ${stats?.total ?? 0}`], ...FILTERS.slice(1).map(([k, t]) => [k, `${t} · ${by[k] ?? 0}`])];
+  return `<div class="ftools"><div class="frow">
+    <label class="search">${ic("search", "i-sm")}<input id="q" type="search" value="${esc(f.q ?? "")}" placeholder="Навык, должность…" aria-label="Поиск"></label>
+    ${fsel("vacancy", "Вакансия", vacOpts, f.vacancy)}
+    ${mgr() ? "" : fsel("status", "Статус", stOpts, f.status)}
+    <details class="fsel dd ${vs.length ? "on" : ""}"><summary>Вердикт: ${vs.length ? vs.map((v) => VERDICT[v][0]).join(", ") : "все"}</summary><div class="ddm">${Object.entries(VERDICT)
+      .map(([k, v]) => `<label><input type="checkbox" data-fv="${k}"${vs.includes(k) ? " checked" : ""}>${ic(v[3], v[4] || "i-sm")}${v[0]}</label>`)
+      .join("")}</div></details>
+    ${fsel("source", "Источник", [["", "все"], ...Object.entries(SRC)], f.source)}
+    ${fsel("days", "Период", DAYS, f.days)}</div>
+    <div class="fmeta"><span><b class="num">${page.total}</b> ${plural(page.total, "найден", "найдено", "найдено")}</span>${fActive(f) ? `<button class="lnk" data-freset>Сбросить фильтры</button><button class="lnk" data-fcopy>${ic("copy", "i-sm")}Скопировать ссылку с фильтром</button>` : ""}
+    ${mgr() || !page.items.length ? "" : `<label class="pk all"><input type="checkbox" data-pickall>все на странице</label>`}
+    <span class="spacer"></span>${fsel("sort", "Сортировка", [["", "по баллу"], ["date", "по дате"]], f.sort)}</div></div><div id="bulk"></div>`;
+}
+
+function pager(total, p) {
+  if (!total) return "";
+  const pages = Math.ceil(total / PAGE);
+  const from = (p - 1) * PAGE + 1;
+  const nums = [...new Set([1, p - 1, p, p + 1, pages])].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  const btns = nums
+    .map((n, i) => `${i && n - nums[i - 1] > 1 ? `<span class="pgap">…</span>` : ""}<button class="pg num" data-pg="${n}"${n === p ? ` aria-current="page"` : ""}>${n}</button>`)
+    .join("");
+  return `<div class="pager"><span class="num">${from <= total ? `${from}–${Math.min(total, p * PAGE)} из ${total}` : `всего ${total}`}</span><span class="spacer"></span>${
+    pages > 1
+      ? `<button class="pg" data-pg="${p - 1}"${p <= 1 ? " disabled" : ""} aria-label="Предыдущая страница">‹</button>${btns}<button class="pg" data-pg="${p + 1}"${p >= pages ? " disabled" : ""} aria-label="Следующая страница">›</button>`
+      : ""
+  }</div>`;
 }
 
 function topBase() {
-  const { list, vacs, stats } = view.base;
-  if (mgr()) st.flt = "cust";
-  const n = (f) => list.filter((c) => f === "all" || c.status === f).length;
-  const week = list.filter((c) => Date.now() - new Date(c.created_at) < 7 * 864e5).length;
+  const { page, vacs, stats, week } = view.base;
+  const r = route();
+  const f = r.f;
+  const p = Math.max(1, +f.p || 1);
+  const list = page.items;
   const open = vacs.filter((v) => v.is_open).length;
-  const sel = route().id ?? list[0]?.id;
+  const sel = r.id ?? list[0]?.id;
+  const count = mgr() ? (fActive(f) ? "" : `${page.total} у вас на рассмотрении`) : `${stats.total} в базе`;
   let h = `<div class="head"><span class="avatar blue">${ic("db")}</span><div class="who"><h1>Кандидаты</h1>
-    <div class="sub"><span>${ic("users", "i-sm")}${mgr() ? `${list.length} у вас на рассмотрении` : `${list.length} в базе`}</span><span>${ic("brief", "i-sm")}${open} ${plural(open, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span></div></div>${mgr() ? "" : `<div class="side">${piiTog()}</div>`}</div>`;
+    <div class="sub">${count ? `<span>${ic("users", "i-sm")}${count}</span>` : ""}<span>${ic("brief", "i-sm")}${open} ${plural(open, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span></div></div>${mgr() ? "" : `<div class="side">${piiTog()}</div>`}</div>`;
   if (!mgr()) {
     const avg = stats.avg_reply_days;
     h += `<div class="stats">
     <div class="card stat warn"><div class="k">${ic("bell", "i-sm")}Ждут ответа</div><div class="v num">${stats.waiting}</div></div>
     <div class="card stat"><div class="k">${ic("clock", "i-sm")}Среднее время ответа</div><div class="v num">${avg == null ? "–" : `${avg} дн.`}</div></div>
-    <div class="card stat"><div class="k">${ic("archive", "i-sm")}В резерве</div><div class="v num">${n("reserve")}</div></div>
+    <div class="card stat"><div class="k">${ic("archive", "i-sm")}В резерве</div><div class="v num">${stats.by_status.reserve ?? 0}</div></div>
     <div class="card stat"><div class="k">${ic("inbox", "i-sm")}Новых за неделю</div><div class="v num">${week}</div></div></div>
    <div id="queue"></div>`;
   }
-  for (const v of mgr() ? [] : vacs.filter((x) => x.reserve_matches.length)) {
+  for (const v of mgr() ? [] : vacs.filter((x) => x.is_open && x.reserve_matches.length)) {
     const m = v.reserve_matches.length;
     h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>Новая вакансия «${esc(v.title)}»: в резерве ${plural(m, "нашёлся", "нашлись", "нашлись")} ${m} ${plural(m, "подходящий", "подходящих", "подходящих")}.</b> ${v.reserve_matches.map(cname).join(", ")}.</div><a class="btn btn-white" href="#/candidates/${v.reserve_matches[0]}">Показать</a></div>`;
   }
-  const rows = list.filter((c) => st.flt === "all" || c.status === st.flt);
-  h += `<div class="card rank"><div class="tools"><label class="search">${ic("search", "i-sm")}<input id="q" type="search" value="${esc(st.q)}" placeholder="Навык, должность…" aria-label="Поиск"></label><div class="chips">
-    ${FILTERS.filter(([k]) => !mgr() || k === "cust").map(([k, t]) => `<button class="chip" aria-pressed="${st.flt === k}" data-flt="${k}">${t} <span class="num">${n(k)}</span></button>`).join("")}</div></div>`;
-  if (!rows.length)
-    h += `<div class="stub" style="padding:18px">${ic("search")}${list.length || st.q ? "Никого не нашлось — измените поиск или фильтр." : mgr() ? "Рекрутер ещё не передал вам кандидатов." : "В базе пока пусто. Нажмите «Загрузить»."}</div>`;
-  h += rows
+  h += `<div class="card rank">${filters(f)}`;
+  if (!list.length)
+    h += `<div class="stub" style="padding:18px">${ic("search")}${
+      page.total
+        ? `На этой странице никого. <button class="lnk" data-pg="1">К первой странице</button>`
+        : fActive(f)
+          ? `Никого не нашли — <button class="lnk" data-freset>сбросить фильтры</button>`
+          : mgr()
+            ? "Рекрутер ещё не передал вам кандидатов."
+            : "В базе пока пусто. Нажмите «Загрузить»."
+    }</div>`;
+  h += list
     .map(
-      (c) => `<button class="crow" aria-selected="${c.id === sel}" data-href="#/candidates/${c.id}">
+      (c) => `<div class="crow" role="button" tabindex="0" aria-selected="${c.id === sel}" data-href="${fhash(f, c.id)}">
+     ${mgr() ? "<span></span>" : `<label class="pk"><input type="checkbox" data-pick="${c.id}" aria-label="Выбрать: ${cname(c.id)}"></label>`}
      <span class="tile round">${ic("user")}</span>
-     <span><div class="t" style="font-weight:600">${cname(c.id)}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${ic("cal", "i-sm")}${day(c.created_at)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
+     <span class="cm"><div class="t">${cname(c.id)}</div><div class="meta">${c.position ? `<span class="pos">${ic("brief", "i-sm")}<span>${esc(c.position)}</span></span>` : ""}<span>${ic("inbox", "i-sm")}${esc(SRC[c.source] ?? c.source)}</span><span>${ic("cal", "i-sm")}${day(c.created_at)}</span>${c.versions > 1 ? `<span>${ic("hist", "i-sm")}версий: ${c.versions}</span>` : ""}</div></span>
      <span class="best"><b class="num">${num(c.best_vacancy_score ?? c.best_score)}</b><span>${esc(c.best_title ?? "лучший балл")}</span></span>
      <span><span class="pill ${PS[c.status][1]}">${PS[c.status][0]}</span>${!mgr() && c.waiting && c.waiting_days ? `<div class="wait">${ic("bell", "i-sm")}ждёт ${c.waiting_days} дн.</div>` : ""}</span>
-     ${mgr() ? "<span></span>" : `<span class="reply btn btn-ghost" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</span>`}</button>`,
+     ${mgr() ? "<span></span>" : `<button class="reply btn btn-ghost" data-reply="${c.id}">${ic("send", "i-sm")}Ответить</button>`}</div>`,
     )
     .join("");
-  return h + "</div>";
+  return h + pager(page.total, p) + "</div>";
+}
+
+// галочки и панель действий пачкой — без перерисовки списка
+function drawPicked() {
+  const pk = view.picked;
+  const el = $("#bulk");
+  if (!el) return;
+  for (const x of document.querySelectorAll("input[data-pick]")) x.checked = pk.has(+x.dataset.pick);
+  const all = $("[data-pickall]");
+  if (all) all.checked = pk.size > 0 && view.base.page.items.every((c) => pk.has(c.id));
+  const n = pk.size;
+  el.innerHTML = n
+    ? `<div class="bulk"><b>Выбрано ${n}</b><span class="spacer"></span><button class="btn btn-primary" data-bulk="1">${ic("send", "i-sm")}Заказчику</button><button class="btn btn-ghost" data-bulk="3">${ic("archive", "i-sm")}В резерв</button><button class="btn btn-ghost" data-bulk="4">${ic("x", "i-sm")}Отказ</button><button class="plain" data-bulk="0">Снять выбор</button></div>`
+    : "";
+}
+
+// пачкой — тем же /api/triage/decide, что и «Разбор»; вакансия — из фильтра или общая лучшая у выбранных
+async function bulk(a) {
+  if (!a) {
+    view.picked.clear();
+    return drawPicked();
+  }
+  const rows = view.base.page.items.filter((c) => view.picked.has(c.id));
+  // vacancy_id одна на вызов: без фильтра по вакансии — отдельный вызов на каждую лучшую вакансию (счётчик «заказчику»)
+  const groups = new Map();
+  for (const c of rows) {
+    const vid = route().f?.vacancy || c.best_vacancy || null;
+    groups.set(vid, [...(groups.get(vid) ?? []), c.id]);
+  }
+  const prev = rows.map((c) => [c.id, c.status]);
+  try {
+    for (const [vid, ids] of groups) await post("/api/triage/decide", { candidate_ids: ids, decision: a, vacancy_id: vid });
+  } catch (e) {
+    return toast(`Решение не сохранено: ${e.message}`);
+  }
+  view.picked = new Set();
+  const n = rows.length;
+  const again = () => render();
+  toast(`${n === 1 ? nameText(rows[0].id) : `${n} ${plural(n, "кандидат", "кандидата", "кандидатов")}`} → ${PS[DEC2ST[a]][0]}`, async () => {
+    for (const [id, s] of prev) await setStatus(id, s);
+    again();
+  });
+  again();
 }
 
 const EVENT = {
@@ -363,41 +493,69 @@ const CELL = { fit: "s-full", partial: "s-partial" };
 const isOk = (c) => c.verdict === "fit" || c.verdict === "partial";
 let vacTimer = null;
 
+let vacSeq = 0;
 async function renderVacs(r) {
   clearTimeout(vacTimer);
+  const seq = ++vacSeq;
   if (!view.vl) $("#top").innerHTML = stateBox("load", "Загружаем вакансии…");
   try {
-    const vacs = (await api("/api/vacancies")).filter((v) => v.is_open);
+    const all = await api("/api/vacancies");
+    const vacs = all.filter((v) => v.is_open || st.vclosed);
     const ranks = await Promise.all(vacs.map((v) => api(`/api/vacancies/${encodeURIComponent(v.id)}/candidates?pii=${st.pii}`)));
-    ranks.forEach(remember);
-    view.vl = { vacs, ranks };
+    ranks.forEach((x) => remember(x.slice(0, TOP)));
+    if (seq !== vacSeq || route().name !== "vacancies") return;
+    view.vl = { all, vacs, ranks };
   } catch (e) {
+    if (seq !== vacSeq || route().name !== "vacancies") return;
     $("#top").innerHTML = failed(e);
     $("#doc").innerHTML = "";
     return;
   }
   const { vacs } = view.vl;
-  const i = Math.max(0, vacs.findIndex((v) => v.id === r.vid));
+  const i = (view.vl.i = Math.max(0, vacs.findIndex((v) => v.id === r.vid)));
+  const typing = document.activeElement?.id === "vq"; // опрос резерва не выбивает поиск посреди ввода
   $("#top").innerHTML = topVacs(i);
+  if (typing) {
+    const q = $("#vq");
+    q.focus();
+    q.setSelectionRange(q.value.length, q.value.length);
+  }
   $("#doc").innerHTML = vacCard(i);
   // сверка резерва идёт в фоне — перечитываем, пока не закончится
   if (vacs.some((v) => v.reserve_state === "running"))
     vacTimer = setTimeout(() => route().name === "vacancies" && renderVacs(route()), POLL_MS);
 }
 
+const TOP = 30; // на большом потоке матрица и рейтинг — только лучшие по баллу
+const allOf = (v) => `<a class="lnk" href="#/candidates?vacancy=${encodeURIComponent(v.id)}">Все кандидаты по вакансии ${ic("arrow", "i-sm")}</a>`;
+
+function vacList(i) {
+  const { all, vacs } = view.vl;
+  const q = st.vq.trim().toLowerCase();
+  const rows = vacs.filter((v) => !q || v.title.toLowerCase().includes(q));
+  const closed = all.length - all.filter((v) => v.is_open).length;
+  const cell = (n, cls = "") => `<span class="num ${n ? cls : "z"}">${n}</span>`;
+  return `<div class="card rank vl"><div class="tools"><label class="search">${ic("search", "i-sm")}<input id="vq" type="search" value="${esc(st.vq)}" placeholder="Название вакансии" aria-label="Поиск по названию"></label><span class="spacer"></span>${
+    closed ? `<label class="switch">Показать закрытые · ${closed} <button class="tog" role="switch" aria-checked="${st.vclosed}" data-showclosed aria-label="Показать закрытые вакансии"></button></label>` : ""
+  }</div>
+   <div class="vrow vh"><span>Вакансия</span><span>Откликов</span><span>Ждут разбора</span><span>Подходят</span><span>Заказчику</span></div>
+   ${rows
+     .map(
+       (v) => `<button class="vrow" data-href="#/vacancies/${encodeURIComponent(v.id)}"${v === vacs[i] ? ` aria-current="true"` : ""}><span class="vt"><span>${esc(v.title)}</span>${v.is_open ? "" : `<span class="pill p-rej">закрыта</span>`}</span>${cell(v.applied)}${cell(v.waiting, "w")}${cell(v.fit, "ok")}${cell(v.to_customer)}</button>`,
+     )
+     .join("")}${rows.length ? "" : `<div class="stub" style="padding:14px 18px">${ic("search")}Нет вакансий с таким названием.</div>`}</div>`;
+}
+
 function topVacs(i) {
-  const { vacs, ranks } = view.vl;
+  const { all, vacs, ranks } = view.vl;
+  const open = all.filter((v) => v.is_open).length;
+  const closed = all.length - open;
   const add = `<button class="btn btn-ghost" data-upload="vac">${ic("plus", "i-sm")}Добавить вакансию</button>`;
-  const head = (title, sub) =>
-    `<div class="head"><span class="avatar blue">${ic("brief")}</span><div class="who"><h1>${title}</h1>${sub}</div><div class="side"><span style="display:flex;gap:8px">${add}</span>${piiTog()}</div></div>`;
-  if (!vacs.length) return head("Вакансии", "") + stateBox("empty", "Открытых вакансий нет. Добавьте вакансию файлом, текстом или с hh.ru.");
+  let h = `<div class="head"><span class="avatar blue">${ic("brief")}</span><div class="who"><h1>Вакансии</h1><div class="sub"><span>${ic("brief", "i-sm")}${open} ${plural(open, "открытая", "открытые", "открытых")}${closed ? ` · ${closed} ${plural(closed, "закрытая", "закрытые", "закрытых")}` : ""}</span></div></div><div class="side"><span style="display:flex;gap:8px">${add}</span>${piiTog()}</div></div>`;
+  if (!vacs.length) return h + (closed ? vacList(i) : "") + stateBox("empty", "Открытых вакансий нет. Добавьте вакансию файлом, текстом или с hh.ru.");
+  h += vacList(i);
   const v = vacs[i];
   const rows = ranks[i];
-  const ok = rows.filter(isOk).length;
-  let h = head(
-    esc(v.title),
-    `<div class="sub"><span>${ic("brief", "i-sm")}${vacs.length} ${plural(vacs.length, "открытая вакансия", "открытые вакансии", "открытых вакансий")}</span><span>${ic("users", "i-sm")}${rows.length} резюме · ${ok} ${plural(ok, "подходит", "подходят", "подходят")} хотя бы частично</span></div>`,
-  );
   const m = v.reserve_matches.length;
   if (v.reserve_state === "running")
     h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>Сверяем с резервом…</b> Проверено ${v.reserve_checked}.</div></div>`;
@@ -405,14 +563,19 @@ function topVacs(i) {
     h += `<div class="callout"><span class="ico">${ic("alert")}</span><div><b>Сверка с резервом не удалась:</b> ${esc(v.reserve_error)}</div></div>`;
   else if (m)
     h += `<div class="callout"><span class="ico">${ic("archive")}</span><div><b>В резерве ${plural(m, "нашёлся", "нашлись", "нашлись")} ${m} ${plural(m, "подходящий", "подходящих", "подходящих")}.</b> ${v.reserve_matches.map(cname).join(", ")}.</div><a class="btn btn-white" href="#/candidates/${v.reserve_matches[0]}/vacancy/${encodeURIComponent(v.id)}">Показать</a></div>`;
-  const cols = [...new Set(ranks.flat().map((c) => c.id))];
+  // столбцы матрицы — 30 лучших по баллу среди показанных вакансий
+  const best = new Map();
+  for (const c of ranks.flat()) best.set(c.id, Math.max(best.get(c.id) ?? -1, c.score));
+  const cols = [...best].sort((a, b) => b[1] - a[1]).slice(0, TOP).map(([id]) => id);
+  const q = st.vq.trim().toLowerCase();
+  const shown = vacs.map((x, k) => [x, k]).filter(([x]) => !q || x.title.toLowerCase().includes(q));
   const col = (id) => (st.pii && names[id] ? esc(names[id].split(" ")[0]) : `К${id}`);
   if (cols.length)
     h += `<div class="card heat"><div class="heat-h"><b>${ic("grid", "c-acc")}Все вакансии × кандидаты</b><span class="legend"><span><i style="background:var(--full-bg)"></i>подходит</span><span><i style="background:var(--part-bg)"></i>частично</span><span><i style="background:var(--unk-bg)"></i>нет</span></span></div>
    <div class="hscroll"><div class="hg" style="grid-template-columns:minmax(180px,280px) repeat(${cols.length},minmax(64px,88px))"><span class="hcorner"></span>${cols.map((id) => `<span class="ch" title="${cname(id)}">${col(id)}</span>`).join("")}
-   ${vacs
+   ${shown
      .map(
-       (x, k) =>
+       ([x, k]) =>
          `<button class="hname ${k === i ? "on" : ""}" data-href="#/vacancies/${encodeURIComponent(x.id)}" title="${esc(x.title)}">${ic("brief", "i-sm")}<span class="ht">${esc(x.title)}</span></button>${cols
            .map((id) => {
              const c = ranks[k].find((y) => y.id === id);
@@ -422,16 +585,18 @@ function topVacs(i) {
            })
            .join("")}`,
      )
-     .join("")}</div></div></div>`;
-  h += `<div class="card rank" aria-label="Рейтинг кандидатов">${
+     .join("")}</div></div>${best.size > TOP ? `<div class="fmeta" style="margin-top:8px">Показаны ${TOP} лучших по баллу из ${best.size}. ${allOf(v)}</div>` : ""}</div>`;
+  const ok = rows.filter(isOk).length;
+  h += `<div class="card rank" aria-label="Рейтинг кандидатов"><div class="tools rk"><b class="vt"><span>${esc(v.title)}</span></b><span class="fmeta">${rows.length} резюме · ${ok} ${plural(ok, "подходит", "подходят", "подходят")} хотя бы частично</span></div>${
     rows.length
       ? rows
+          .slice(0, TOP)
           .map((c, n) => {
             const vv = VERDICT[c.verdict];
             return `<button class="rrow" data-href="#/candidates/${c.id}/vacancy/${encodeURIComponent(v.id)}"><span class="tile round ${vv[2]}">${ic("user")}<em class="num">${n + 1}</em></span>
      <span><div class="t">${cname(c.id)}</div><div class="meta">${c.position ? `<span>${ic("brief", "i-sm")}${esc(c.position)}</span>` : ""}<span>${PS[c.status][0]}</span>${c.blockers.length ? `<span class="bl">${ic("lock", "i-sm")}${esc(whyShort(c.blockers))}</span>` : ""}</div></span>${scoreCell(c)}<span class="verdict ${vv[1]}">${ic(vv[3], "i-sm")}${vv[0]}</span></button>`;
           })
-          .join("")
+          .join("") + `<div class="pager">${rows.length > TOP ? `<span>Показаны ${TOP} лучших из ${rows.length}</span>` : ""}<span class="spacer"></span>${allOf(v)}</div>`
       : `<div class="stub" style="padding:18px">${ic("users")}Оценок по вакансии пока нет: они появятся после загрузки резюме и сверки резерва.</div>`
   }</div>`;
   return h;
@@ -443,12 +608,13 @@ function vacCard(i) {
   const rows = view.vl.ranks[i];
   const n = (f) => rows.filter(f).length;
   const src = v.source.startsWith("hh:") ? "с hh.ru" : v.source === "файл" ? "из файла" : "из текста";
-  return `<div class="ccard"><div class="ch1"><span class="avatar blue">${ic("brief")}</span><div><h2>${esc(v.title)}</h2><div class="sub" style="margin-top:2px"><span>${ic("cal", "i-sm")}добавлена ${day(v.created_at)} ${src}</span></div></div></div>
+  const line = (icn, cls, t, x) => `<div class="ev">${ic(icn, cls)}<span>${t}</span><span class="n num">${x}</span></div>`;
+  return `<div class="ccard"><div class="ch1"><span class="avatar blue">${ic("brief")}</span><div><h2>${esc(v.title)}</h2><div class="sub" style="margin-top:2px"><span>${ic("cal", "i-sm")}добавлена ${day(v.created_at)} ${src}${v.is_open ? "" : " · закрыта"}</span></div></div></div>
+   <div class="sec">Отклики</div>
+   ${line("inbox", "", "откликов", v.applied)}${line("bell", "c-part", "ждут разбора", v.waiting)}${line("send", "c-acc", "у заказчика", v.to_customer)}
    <div class="sec">Кандидаты</div>
-   <div class="ev">${ic("check", "c-full")}<span>подходят</span><span class="n num">${n((c) => c.verdict === "fit")}</span></div>
-   <div class="ev">${ic("half", "c-part")}<span>частично</span><span class="n num">${n((c) => c.verdict === "partial")}</span></div>
-   <div class="ev">${ic("x")}<span>не подходят</span><span class="n num">${n((c) => !isOk(c))}</span></div>
-   <div class="cactions"><button class="btn btn-danger" data-vclose="${esc(v.id)}">${ic("x", "i-sm")}Закрыть вакансию</button></div></div>`;
+   ${line("check", "c-full", "подходят", n((c) => c.verdict === "fit"))}${line("half", "c-part", "частично", n((c) => c.verdict === "partial"))}${line("x", "", "не подходят", n((c) => !isOk(c)))}
+   <div class="cactions"><a class="btn btn-ghost" href="#/candidates?vacancy=${encodeURIComponent(v.id)}">${ic("users", "i-sm")}Все кандидаты</a>${v.is_open ? `<button class="btn btn-danger" data-vclose="${esc(v.id)}">${ic("x", "i-sm")}Закрыть вакансию</button>` : ""}</div></div>`;
 }
 
 function openVacClose(vid) {
@@ -901,7 +1067,7 @@ async function confirmed(kind) {
       toast(`${nameText(c.id)} в резерве`, async () => {
         await setStatus(c.id, prev);
         render();
-      }, ["Открыть резерв", () => { st.flt = "reserve"; go(`#/candidates/${c.id}`); }]);
+      }, ["Открыть резерв", () => go(`#/candidates/${c.id}?status=reserve`)]);
     } else {
       const del = await api(`/api/candidates/${c.id}`, { method: "DELETE" });
       toast(`${nameText(c.id)} удалён со всеми данными${del?.warning ? ` (${del.warning})` : ""}`);
@@ -960,7 +1126,6 @@ async function openUpload(tab) {
       view.batch = null;
       view.batchDone = false;
       modal("upload", null);
-      st.flt = "all";
       go("#/candidates");
       toast("Файлы в очереди — прогресс в «Кандидатах»");
     } catch (err) {
@@ -1098,7 +1263,6 @@ function showLogin() {
 
 function enter(user) {
   st.me = user;
-  st.flt = mgr() ? "cust" : "all";
   st.pii = false;
   $("#login").hidden = true;
   $("#lgerr").textContent = "";
@@ -1142,6 +1306,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target;
   const on = (sel) => t.closest(sel);
   let el;
+  for (const d of document.querySelectorAll("details.dd[open]")) if (!d.contains(t)) d.removeAttribute("open");
   if (on("[data-tgo]") || on("[data-undo]")) {
     const f = on("[data-undo]") ? toastAct.undo : toastAct.go;
     $("#toast")?.remove();
@@ -1198,10 +1363,21 @@ document.addEventListener("click", async (e) => {
     st.batch = view.batch = null;
     sessionStorage.removeItem("rvm-batch");
     renderQueue();
-  } else if ((el = on("[data-flt]"))) {
-    st.flt = el.dataset.flt;
-    $("#top").innerHTML = topBase();
-    renderQueue();
+  } else if (on("[data-freset]")) go(fhash({ sort: route().f?.sort }));
+  else if (on("[data-fcopy]")) {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      toast("Ссылка с фильтром скопирована");
+    } catch {
+      toast("Не удалось скопировать — скопируйте адрес из строки браузера");
+    }
+  } else if ((el = on("[data-pg]"))) setF({ p: +el.dataset.pg > 1 ? el.dataset.pg : "" });
+  else if ((el = on("[data-bulk]"))) bulk(+el.dataset.bulk);
+  else if ((el = on("[data-showclosed]"))) {
+    st.vclosed = !st.vclosed;
+    renderVacs(route());
+  } else if (on(".pk")) {
+    /* галочка выбора: не открывать карточку */
   } else if ((el = on("[data-href]"))) go(el.dataset.href);
   else if (on("[data-pii]")) {
     st.pii = !st.pii;
@@ -1229,19 +1405,37 @@ document.addEventListener("click", async (e) => {
 
 let searchTimer;
 document.addEventListener("input", (e) => {
-  if (e.target.id !== "q") return;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(async () => {
-    st.q = e.target.value.trim();
-    await renderBase(route());
-    const q = $("#q");
+  if (e.target.id === "vq") {
+    st.vq = e.target.value;
+    $("#top").innerHTML = topVacs(view.vl.i);
+    const q = $("#vq");
     q.focus();
     q.setSelectionRange(q.value.length, q.value.length);
+    return;
+  }
+  if (e.target.id !== "q") return;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    if (route().name !== "base") return;
+    st.focusQ = true;
+    setF({ q: e.target.value.trim() });
   }, 300);
 });
 
 document.addEventListener("change", (e) => {
-  if (e.target.matches("[data-pickrow]") && $("#tcount")) $("#tcount").textContent = `(${picked().length})`;
+  const t = e.target;
+  if (t.matches("[data-pickrow]") && $("#tcount")) $("#tcount").textContent = `(${picked().length})`;
+  else if (t.matches("[data-f]")) setF({ [t.dataset.f]: t.value });
+  else if (t.matches("[data-fv]")) {
+    st.ddOpen = true; // несколько вердиктов подряд — меню не закрываем
+    setF({ verdict: [...document.querySelectorAll("[data-fv]:checked")].map((x) => x.dataset.fv).join(",") });
+  } else if (t.matches("[data-pick]")) {
+    view.picked[t.checked ? "add" : "delete"](+t.dataset.pick);
+    drawPicked();
+  } else if (t.matches("[data-pickall]")) {
+    for (const c of view.base.page.items) view.picked[t.checked ? "add" : "delete"](c.id);
+    drawPicked();
+  }
 });
 
 document.addEventListener("submit", (e) => {
