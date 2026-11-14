@@ -121,6 +121,16 @@ UPDATE sqlite_sequence SET seq=max(seq, (SELECT coalesce(max(candidate_id), 0) F
     WHERE name='candidates';
 """
 _MIGRATIONS = [_V1, _V2]  # user_version = число применённых
+# Источники откликов: не номерной версией, а идемпотентно при каждом старте — номера версий
+# параллельных веток (p-lists: v3) при слиянии не столкнутся.
+_SOURCES = """
+CREATE TABLE IF NOT EXISTS source_seen (  -- что уже забрали из почты, папки, hh
+    source TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (source, ref)
+);
+"""
 
 
 class CandidateStatus(StrEnum):
@@ -198,6 +208,7 @@ def init(db: Path) -> None:
             conn.executescript(
                 f"PRAGMA foreign_keys=OFF; BEGIN; {script} PRAGMA user_version={v}; COMMIT;"
             )
+        conn.execute(_SOURCES)
     finally:
         conn.close()
 
@@ -207,7 +218,8 @@ def init(db: Path) -> None:
 
 def add_resume(db: Path, data: bytes, doc: Document, masked: Masked, source: str = "файл") -> Added:
     """Тот же файл → та же версия; иначе новая карточка. Общий телефон или почта с другой
-    карточкой → пометка «возможный повтор», склеивает только рекрутер (merge_candidates)."""
+    карточкой → пометка «возможный повтор», склеивает только рекрутер (merge_candidates).
+    source — откуда резюме: «файл» (ручная загрузка), «почта», «папка», «hh»."""
     sha = hashlib.sha256(data).hexdigest()
     with _tx(db) as conn:
         row = conn.execute("SELECT id, candidate_id FROM resumes WHERE sha256=?", (sha,)).fetchone()
@@ -239,7 +251,7 @@ def add_resume(db: Path, data: bytes, doc: Document, masked: Masked, source: str
                 _now(),
             ),
         ).lastrowid
-        _event(conn, "uploaded", cid, who="система", resume_id=rid)
+        _event(conn, "uploaded", cid, who="система", resume_id=rid, source=source)
         if dup is not None:
             _event(conn, "possible_duplicate", cid, who="система", of=dup)
         assert cid is not None and rid is not None
@@ -667,3 +679,32 @@ def open_vacancies(db: Path) -> dict[str, Document]:
     with _tx(db, write=False) as conn:
         rows = conn.execute("SELECT id, doc FROM vacancies WHERE is_open=1 ORDER BY id").fetchall()
     return {str(r["id"]): Document.model_validate_json(r["doc"]) for r in rows}
+
+
+# --- источники откликов ---
+
+
+def seen(db: Path, source: str, ref: str) -> bool:
+    with _tx(db, write=False) as conn:
+        q = "SELECT 1 FROM source_seen WHERE source=? AND ref=?"
+        return conn.execute(q, (source, ref)).fetchone() is not None
+
+
+def mark_seen(db: Path, source: str, refs: list[str]) -> None:
+    with _tx(db) as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO source_seen (source, ref, at) VALUES (?, ?, ?)",
+            [(source, r, _now()) for r in refs],
+        )
+
+
+def forget_seen(db: Path, source: str, ref: str) -> None:
+    """Элемент не разобран (сервис остановился) — забрать его снова при следующем опросе."""
+    with _tx(db) as conn:
+        conn.execute("DELETE FROM source_seen WHERE source=? AND ref=?", (source, ref))
+
+
+def note(db: Path, type_: str, **details: Any) -> None:
+    """Событие журнала без кандидата (например, ошибка источника)."""
+    with _tx(db) as conn:
+        _event(conn, type_, None, who="система", **details)
