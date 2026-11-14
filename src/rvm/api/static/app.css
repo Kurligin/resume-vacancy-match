@@ -390,3 +390,33 @@ label.drop{display:block;cursor:pointer}
 .me button{color:var(--accent);font-size:13px}
 .mnote{flex:1 0 100%;box-sizing:border-box;font:inherit;font-size:14px;min-height:64px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;resize:vertical}
 .spot>.i{width:24px;height:24px;flex:none}
+
+/* ---------- тур по сценариям ---------- */
+.tour{position:fixed;inset:0;z-index:1000;pointer-events:none}
+.tour-catch{position:absolute;inset:0;pointer-events:auto}
+.tour-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 max(100vw,100vh) rgba(0,0,0,.55);pointer-events:none;
+  transition:left .35s var(--spring,ease),top .35s var(--spring,ease),width .35s var(--spring,ease),height .35s var(--spring,ease)}
+.tour-pop{position:fixed;width:min(380px,calc(100vw - 24px));background:var(--surface);border-radius:18px;padding:18px 18px 14px;
+  box-shadow:0 12px 40px rgba(0,0,0,.25);pointer-events:auto;outline:none;transition:left .35s var(--spring,ease),top .35s var(--spring,ease),opacity .2s}
+.tour.busy .tour-pop{opacity:.6}
+.tour-pop:has(#tour-t:empty){visibility:hidden}
+.tour-k{font-size:12px;font-weight:600;color:var(--fg3);letter-spacing:.02em}
+.tour-pop h3{font-size:18px;font-weight:600;margin:4px 0 6px}
+.tour-x p{color:var(--fg2);font-size:15px;line-height:1.45}
+.tour-x .tour-miss{margin-top:6px;font-size:13px;color:var(--fg3)}
+.tour-nav{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.tour-nav .btn{height:40px;padding:0 16px;font-size:14px}
+.tour-nav .btn-primary{margin-left:auto}
+.tour-nav .btn:disabled{opacity:.4}
+.tour-sc{display:grid;gap:6px;margin-top:12px}
+.tour-sc button{display:block;text-align:left;padding:11px 14px;border-radius:12px;background:rgba(0,0,0,.04);font-size:14px;transition:background .2s}
+.tour-sc button:hover:not(:disabled){background:var(--accent-soft)}
+.tour-sc button:disabled{opacity:.55;cursor:default}
+.tour-sc b{font-weight:500}
+.tour-sc small{display:block;color:var(--fg3);font-size:12px}
+.tour-link{display:block;margin:14px auto 0;color:var(--accent);font-size:14px;font-weight:500;padding:8px 12px;border-radius:9px}
+.tour-link:hover{background:var(--accent-soft)}
+.tour-inv{position:fixed;right:24px;bottom:24px;z-index:35;display:flex;align-items:center;gap:10px;background:var(--surface);
+  border-radius:16px;padding:12px 12px 12px 18px;box-shadow:0 8px 30px rgba(0,0,0,.18);font-size:15px;animation:fade .2s}
+.tour-inv .btn{height:36px}
+@media (max-width:600px){.tour-inv{left:12px;right:12px;bottom:12px;flex-wrap:wrap}}
