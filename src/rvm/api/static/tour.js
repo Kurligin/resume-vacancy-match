@@ -134,7 +134,7 @@ const SCENARIOS = [
         act: clickIt,
         done: () => location.hash === cand(c.rd.id, c.rd.to),
       },
-      { go: "#/triage", prep: bucket("need"), sel: ".decide [data-act='2']", title: "Решение в «Разборе»", text: "Такие отклики попадают в «Нужно ваше решение». Клавиша 2 — предложить кандидату другую вакансию." },
+      { go: "#/triage", prep: bucket("need"), sel: ".decide [data-act='2']", title: "Решение в «Разборе»", text: "Такие отклики попадают в «Нужно ваше решение». Вариант 2 — предложить кандидату другую вакансию; в работе его выбирают кнопкой или клавишей 2 (под туром клавиши не действуют)." },
     ],
   },
   {
@@ -161,10 +161,11 @@ const SCENARIOS = [
   {
     key: "tri",
     title: "Пачка откликов → пакет руководителю",
+    writes: true,
     steps: () => [
       { go: "#/triage", prep: bucket("need"), sel: ".buckets", title: "Разбор откликов", text: "Пачка откликов разложена по корзинам. Внимание нужно только «Нужно ваше решение»." },
       { prep: bucket("need"), sel: ".tcard", title: "Карточка отклика", text: "Лучшая вакансия, балл с вилкой, почему отклик здесь, доводы за и против со ссылками на строки резюме." },
-      { prep: bucket("need"), sel: ".decide", title: "Решение", text: "Кнопкой или клавишами 1–4. Подсвечен вариант системы, решает рекрутер." },
+      { prep: bucket("need"), sel: ".decide", title: "Решение", text: "В работе решение принимают кнопкой или клавишами 1–4 (под туром клавиши не действуют). Подсвечен вариант системы, решает рекрутер." },
       {
         prep: bucket("fit"),
         sel: "[data-tpack]",
@@ -196,9 +197,11 @@ const SCENARIOS = [
   {
     key: "ans",
     title: "Ответы кандидата → пересчёт",
+    writes: true,
     steps: (c) => {
       const li = () => $(`#pane [data-q="${c.ans.q}"]`)?.closest("li");
-      const answered = () => li()?.querySelector(".eff")?.textContent.includes(FROM);
+      let did = !!c.ans.answered; // залипает: на вкладке «Требования» строки вопроса уже нет
+      const answered = () => (did ||= !!li()?.querySelector(".eff")?.textContent.includes(FROM));
       return [
         { go: cand(c.ans.id, c.ans.vid), prep: tab("req"), sel: "#pane .why", title: "До ответов", text: `«${c.ans.title}»: балл ${num(c.ans.score)}, вилка ${num(c.ans.low)}–${num(c.ans.high)}. Строки «не указано» — то, что стоит спросить.` },
         { sel: "[data-tab=qs]", title: "Вопросы", text: "Откройте вкладку «Вопросы».", act: clickIt, done: () => $("[data-tab=qs]")?.getAttribute("aria-selected") === "true" },
@@ -206,25 +209,30 @@ const SCENARIOS = [
           prep: tab("qs"),
           sel: li,
           title: "Ответ кандидата",
-          text: () => (answered() ? "Ответ по этой строке уже отмечен — он учтён в балле. Можно поменять его кнопками." : "Кандидат ответил на звонке — отметьте «Да». Модель не вызывается, пересчёт делает код."),
-          act: () => (answered() ? null : $(`#pane [data-q="${c.ans.q}"][data-ans=full]`)?.click()),
+          text: () => (answered() ? "Ответ по этой строке уже отмечен — он учтён в балле. Поменять его можно кнопками в строке." : "Если кандидат ответил на звонке «да», нажмите «Да» в подсвеченной строке — ответ запишется, балл пересчитает код без модели. «Далее» — дальше без записи."),
+          manual: true, // запись только по кнопке пользователя: «Далее» за него ничего не нажимает
           done: answered,
         },
-        { sel: SEL_ROW, title: "Балл пересчитан", text: "Балл, вилка и вердикт обновились. Места вакансий и переадресация пересчитываются вместе с ними." },
-        { sel: "#summary", title: "«Кратко» пересобран", text: "Закрытые строки ушли из рисков, рекомендация — с новым баллом." },
-        { prep: tab("req"), sel: `#pane .req[data-req="${c.ans.rid}"]`, title: "Видно источник", text: "Строка помечена «со слов кандидата»: подтверждено ответом, а не резюме." },
+        { sel: SEL_ROW, title: "Балл пересчитан", text: () => (answered() ? "Балл, вилка и вердикт обновились. Места вакансий и переадресация пересчитываются вместе с ними." : "После ответа здесь обновятся балл, вилка и вердикт, а с ними места вакансий и переадресация.") },
+        { sel: "#summary", title: "«Кратко» пересобран", text: () => (answered() ? "Закрытые строки ушли из рисков, рекомендация — с новым баллом." : "После ответа закрытые строки уйдут из рисков, рекомендация пересчитается с новым баллом.") },
+        { prep: tab("req"), sel: `#pane .req[data-req="${c.ans.rid}"]`, title: "Видно источник", text: () => (answered() ? "Строка помечена «со слов кандидата»: подтверждено ответом, а не резюме." : "После ответа строка получит пометку «со слов кандидата»: подтверждено ответом, а не резюме.") },
       ];
     },
   },
 ];
 
-// шаг без своего адреса — на экране предыдущего шага сценария: так «Назад» возвращает на нужный экран
+// шаг без своего адреса — на экране предыдущего шага сценария: так «Назад» возвращает на нужный экран.
+// Демо-вход отключён — шаги чужой роли выпадают (demo не задан у состояния старой версии — не фильтруем)
 const stepsOf = (keys, ctx) =>
   keys.flatMap((k) => {
     const sc = SCENARIOS.find((s) => s.key === k);
     let go = null;
-    return sc.steps(ctx).map((s) => ({ ...s, go: (go = s.go ?? go), sc: sc.title }));
+    return sc
+      .steps(ctx)
+      .map((s) => ({ ...s, go: (go = s.go ?? go), sc: sc.title }))
+      .filter((s) => ctx.demo !== false || (s.role ?? "recruiter") === ctx.role);
   });
+const hit = (s) => !!(s?.act || s?.manual); // подсвеченный элемент кликабелен
 
 /* ---------- слой: затемнение, вырез, подсказка ---------- */
 
@@ -257,11 +265,12 @@ function onPop(e) {
   else if (b.dataset.t === "prev") show(st.i - 1);
   else if (b.dataset.t === "end") end();
   else if (b.dataset.t === "menu") open();
-  else if (b.dataset.sc) start(b.dataset.sc === "*" ? SCENARIOS.filter((s) => need(s, st.ctx)).map((s) => s.key) : [b.dataset.sc]);
+  else if (b.dataset.sc) start(b.dataset.sc === "*" ? SCENARIOS.filter((s) => usable(s, st.ctx)).map((s) => s.key) : [b.dataset.sc]);
 }
 
 const NEED = { one: (c) => c.one, rd: (c) => c.rd, cmp: (c) => c.strong && c.partial, none: (c) => c.none, tri: (c) => c.tri, ans: (c) => c.ans };
 const need = (s, c) => !!NEED[s.key](c);
+const usable = (s, c) => need(s, c) && stepsOf([s.key], c).length > 0;
 
 function popup(kicker, title, html, nav) {
   const { pop } = mount();
@@ -338,9 +347,13 @@ const hashTo = (h) =>
   location.hash === h
     ? Promise.resolve()
     : new Promise((ok) => {
-        addEventListener("hashchange", ok, { once: true });
+        const done = () => {
+          removeEventListener("hashchange", done);
+          ok();
+        };
+        addEventListener("hashchange", done);
         location.hash = h;
-        setTimeout(ok, 400);
+        setTimeout(done, 400);
       });
 
 async function show(i) {
@@ -374,12 +387,12 @@ async function show(i) {
     `<button class="btn btn-ghost" data-t="prev" ${i ? "" : "disabled"}>‹ Назад</button><button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">${last ? "Готово" : "Далее ›"}</button>`,
   );
   if (el) el.scrollIntoView({ block: "center", behavior: reduced() ? "auto" : "smooth" });
-  place(el, !!s.act);
+  place(el, hit(s));
   ui.pop.focus({ preventScroll: true });
   const was = s.done?.(); // уже сделано до показа шага — не перескакивать, ждать «Далее»
   tick = setInterval(() => {
     if (g !== gen) return clearInterval(tick);
-    place(find(s.sel) ?? el, !!s.act);
+    place(find(s.sel) ?? el, hit(s));
     if (!was && s.done?.()) {
       clearInterval(tick);
       setTimeout(() => g === gen && show(i + 1), 500); // дать увидеть результат действия
@@ -405,9 +418,13 @@ async function switchRole(r) {
   ui?.d.classList.add("busy");
   try {
     await api("/api/login", { role: r });
-  } catch {
-    popup("Тур", "Не удалось сменить роль", "<p>Попробуйте ещё раз или завершите тур.</p>", `<button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">Пропустить шаг</button>`);
+  } catch (e) {
+    // тур уже закрыт (возврат роли из end) — окна нет, только сообщение
+    if (!st) return note(`Тур закрыт, но вернуть роль не удалось (${e.message}). Выйдите и войдите заново.`);
+    popup("Тур", "Не удалось сменить роль", `<p>${esc(e.message)}. Пропустите шаг или завершите тур.</p>`, `<button class="btn btn-ghost" data-t="end">Завершить</button><button class="btn btn-primary" data-t="next">Пропустить шаг</button>`);
     ui.d.classList.remove("busy");
+    place(null);
+    ui.pop.focus({ preventScroll: true });
     return;
   }
   // приложение после смены пользователя перечитывает всё с нуля — так же, как при выходе
@@ -424,11 +441,12 @@ function stop() {
 
 function end() {
   steps[st?.i]?.leave?.();
-  const back = role !== "recruiter";
+  const home = st?.ctx?.role ?? "recruiter"; // вернуть ту роль, с которой тур начали
+  const back = role !== home;
   st = null;
   save(KEY, null);
   stop();
-  if (back) switchRole("recruiter");
+  if (back) switchRole(home);
 }
 
 function start(keys) {
@@ -446,21 +464,24 @@ async function open() {
   place(null);
   try {
     role = (await api("/api/me")).role;
-    st.ctx = await collect();
+    const demo = (await api("/api/login-options").catch(() => ({}))).demo === true;
+    st.ctx = { ...(await collect()), demo, role };
   } catch (e) {
     popup("Как это работает", "Данные не загрузились", `<p>${esc(e.message)}</p>`, `<button class="btn btn-ghost" data-t="end">Закрыть</button><button class="btn btn-primary" data-t="menu">Ещё раз</button>`);
     ui.d.classList.remove("busy");
     place(null);
     return;
   }
-  const any = SCENARIOS.some((s) => need(s, st.ctx));
+  const any = SCENARIOS.some((s) => usable(s, st.ctx));
   popup(
     "Как это работает",
     "Сценарии работы",
-    `<p>Выберите сценарий или пройдите все. Примеры — кандидаты из базы, подобранные под сценарий.</p>
+    `<p>Выберите сценарий или пройдите все. Примеры — кандидаты из базы, подобранные под сценарий. «Весь тур» включает сценарии с пометкой «меняет данные стенда».</p>
      <div class="tour-sc">${SCENARIOS.map((s, k) => {
-       const ok = need(s, st.ctx);
-       return `<button data-sc="${s.key}" ${ok ? "" : "disabled"}><b>${k + 1}. ${esc(s.title)}</b>${ok ? "" : "<small>нет такого кандидата в базе</small>"}</button>`;
+       const ok = usable(s, st.ctx);
+       const cut = ok && stepsOf([s.key], st.ctx).length < s.steps(st.ctx).length;
+       const why = !need(s, st.ctx) ? ["нет такого кандидата в базе"] : !ok ? ["нужен демо-вход по ролям, а он отключён"] : [cut && "без шагов другой роли: демо-вход отключён", s.writes && "меняет данные стенда"].filter(Boolean);
+       return `<button data-sc="${s.key}" ${ok ? "" : "disabled"}><b>${k + 1}. ${esc(s.title)}</b>${why.length ? `<small>${why.join(" · ")}</small>` : ""}</button>`;
      }).join("")}</div>`,
     `<button class="btn btn-ghost" data-t="end">Закрыть</button><button class="btn btn-primary" data-sc="*" ${any ? "" : "disabled"}>Весь тур ›</button>`,
   );
@@ -476,11 +497,12 @@ async function signedIn(ms = 8000) {
   return false;
 }
 
-function invite() {
+// плашка в углу: приглашение в тур (ask) или сообщение
+function note(text, ask) {
   const d = document.createElement("div");
   d.className = "tour-inv";
   d.setAttribute("role", "status");
-  d.innerHTML = `<span>Показать, как это работает?</span><button class="btn btn-primary" data-i="1">Показать</button><button class="btn btn-ghost" data-i="">Не сейчас</button>`;
+  d.innerHTML = `<span>${esc(text)}</span>${ask ? `<button class="btn btn-primary" data-i="1">Показать</button>` : ""}<button class="btn btn-ghost" data-i="">${ask ? "Не сейчас" : "Закрыть"}</button>`;
   d.addEventListener("click", (e) => {
     const b = e.target.closest("[data-i]");
     if (!b) return;
@@ -501,28 +523,44 @@ document.addEventListener(
     } else if (e.target.closest("[data-tour-open]")) open();
     else if (e.target.closest('[data-login="recruiter"]') && !load(OFFERED, localStorage)) {
       save(OFFERED, 1, localStorage);
-      signedIn().then((ok) => ok && invite());
+      signedIn().then((ok) => ok && note("Показать, как это работает?", true));
     }
   },
   true,
 );
 
+const FOC = "button:not([disabled]),a[href],input,select,textarea";
+
+// aria-modal: Tab ходит по кнопкам подсказки и, если шаг кликабельный, по подсвеченному элементу
+function tabbable() {
+  const s = st?.i >= 0 ? steps[st.i] : null;
+  const t = hit(s) ? find(s.sel) : null;
+  return [...ui.pop.querySelectorAll(FOC), ...(t ? [t, ...t.querySelectorAll(FOC)].filter((x) => x.matches(FOC)) : [])];
+}
+
+// capture на window — раньше обработчиков app.js: под туром до приложения доходит только ввод в полях
 addEventListener(
   "keydown",
   (e) => {
     if (!ui) return;
     if (e.key === "Escape") end();
-    else if (e.target.closest?.("input,textarea,select") || st?.i < 0) return;
-    else if (e.key === "ArrowRight") next();
-    else if (e.key === "ArrowLeft") show(st.i - 1);
-    else return;
+    else if (e.key === "Tab") {
+      const f = tabbable();
+      const k = f.indexOf(document.activeElement);
+      const d = e.shiftKey ? -1 : 1;
+      if (!f.length) ui.pop.focus();
+      else f[k < 0 ? (d > 0 ? 0 : f.length - 1) : (k + d + f.length) % f.length].focus();
+    } else if (e.target.closest?.("input,textarea,select")) return;
+    else if (st?.i >= 0 && e.key === "ArrowRight") next();
+    else if (st?.i >= 0 && e.key === "ArrowLeft") show(st.i - 1);
+    else return e.stopImmediatePropagation(); // 1–4, Enter и прочее не уходят в «Разбор»; Enter на кнопке подсказки работает — действие по умолчанию не отменено
     e.preventDefault();
-    e.stopImmediatePropagation(); // стрелки и Esc не уходят в «Разбор» и окна приложения
+    e.stopImmediatePropagation();
   },
   true,
 );
 
-const replace = () => ui && st?.i >= 0 && place(find(steps[st.i]?.sel), !!steps[st.i]?.act);
+const replace = () => ui && st?.i >= 0 && place(find(steps[st.i]?.sel), hit(steps[st.i]));
 addEventListener("resize", replace);
 addEventListener("scroll", replace, { capture: true, passive: true });
 

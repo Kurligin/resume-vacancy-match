@@ -11,3 +11,4 @@ __pycache__/
 /var/
 !data/demo/cache.sqlite
 /data/case
+data/demo/usage.jsonl
