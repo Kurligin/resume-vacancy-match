@@ -1,3 +1,24 @@
+<p align="center"><img src="docs/banner.png" alt="Сверка — какие вакансии подходят кандидату и почему" width="100%"></p>
+
+<p align="center">
+  <a href="https://mipt-hac.rapira-cloud.ru"><img src="https://img.shields.io/badge/Демо-mipt--hac.rapira--cloud.ru-0071e3?style=for-the-badge" alt="Демо"></a>
+  <a href="https://drive.google.com/file/d/1nr2uP4koagEd5sNF-avSTVaahkE8FDKe/view?usp=sharing"><img src="https://img.shields.io/badge/Ролик-2:24-1d1d1f?style=for-the-badge&logo=googledrive&logoColor=white" alt="Ролик"></a>
+  <a href="https://drive.google.com/file/d/1Qx8DSFeHBcM_Rqx7Sdhxx6fnuelDhqfu/view?usp=sharing"><img src="https://img.shields.io/badge/Презентация-PDF-1d1d1f?style=for-the-badge&logo=googledrive&logoColor=white" alt="Презентация"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Pydantic-E92063?style=flat-square&logo=pydantic&logoColor=white" alt="Pydantic">
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
+  <img src="https://img.shields.io/badge/Docker_Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose">
+  <img src="https://img.shields.io/badge/Qwen_3.6_35B-открытые_веса-615CED?style=flat-square" alt="Qwen 3.6 35B">
+  <img src="https://img.shields.io/badge/Tesseract-OCR-5A5A5A?style=flat-square" alt="Tesseract OCR">
+  <img src="https://img.shields.io/badge/Natasha-NER-5A5A5A?style=flat-square" alt="Natasha">
+  <img src="https://img.shields.io/badge/RapidFuzz-5A5A5A?style=flat-square" alt="RapidFuzz">
+  <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
+</p>
+
 # Сверка — резюме и вакансии
 
 Сервис для рекрутера: загружаете резюме (одно, пачку или zip) — получаете по каждой открытой
@@ -17,6 +38,17 @@
 находит строки резюме; статусы, стаж, балл, рейтинг и проверку цитат считает код.
 
 ![Кандидаты](docs/screens/candidates.png)
+
+## Артефакты для жюри
+
+| Что | Ссылка |
+|---|---|
+| Демо-стенд, вход в один клик | https://mipt-hac.rapira-cloud.ru |
+| Ролик, 2:24 | https://drive.google.com/file/d/1nr2uP4koagEd5sNF-avSTVaahkE8FDKe/view?usp=sharing |
+| Презентация, PDF | https://drive.google.com/file/d/1Qx8DSFeHBcM_Rqx7Sdhxx6fnuelDhqfu/view?usp=sharing |
+| Код | https://github.com/Kurligin/resume-vacancy-match |
+| Сценарии использования: вход и ожидаемый результат | [docs/use-cases.md](docs/use-cases.md) |
+| План внедрения | [docs/rollout.md](docs/rollout.md) |
 
 ## Быстрый старт
 
